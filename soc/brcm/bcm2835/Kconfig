@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config SOC_BCM2835
+	select ARM
+	# Temporary compile scaffold: this currently reuses the generic
+	# A-profile path while ARM1176-specific arch support is brought up.
+	select CPU_ARM1176JZF_S
+	select ARM_CUSTOM_INTERRUPT_CONTROLLER
+	select BCM2835_ARMCTRL_INTC
+	select SYS_CLOCK_EXISTS
+	select BCM2835_SYSTEM_TIMER

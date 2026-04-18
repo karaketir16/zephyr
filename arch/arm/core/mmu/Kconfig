@@ -19,7 +19,15 @@ config ARM_AARCH32_MMU
 choice ARM_AARCH32_MMU_TYPE
 	prompt "MMU Type"
 	default ARM_AARCH32_MMU_VMSA_V5 if CPU_AARCH32_ARM9
-	default ARM_AARCH32_MMU_VMSA_V7 if CPU_AARCH32_CORTEX_A
+	default ARM_AARCH32_MMU_NONE if ARMV6_ARM1176
+	default ARM_AARCH32_MMU_VMSA_V7 if CPU_AARCH32_CORTEX_A && !ARMV6_ARM1176
+
+config ARM_AARCH32_MMU_NONE
+	bool "No MMU support yet"
+	help
+	  Keep MMU support disabled. This is the temporary choice for the
+	  ARM1176JZF-S bring-up until the ARM11 memory-management path is
+	  designed and reviewed.
 
 config ARM_AARCH32_MMU_VMSA_V5
 	bool "ARMv5 MMU Support"

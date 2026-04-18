@@ -100,6 +100,37 @@ EL1_Reset_Handler:
 
 #endif
 
+#if defined(CONFIG_ARMV6_ARM1176)
+    /*
+     * ARM1176 firmware handoff is not guaranteed to leave caches, MMU, or the
+     * high-vector setting in the exact state Zephyr expects. Normalize the CPU
+     * into SVC32, invalidate caches/TLBs, and clear the relevant SCTLR bits
+     * before continuing with Zephyr stack and vector setup.
+     */
+    mrs r0, cpsr
+    bic r0, r0, #0x3f
+    orr r0, r0, #(MODE_SVC | I_BIT | F_BIT)
+    msr cpsr_c, r0
+
+    mov r0, #0
+    mcr p15, 0, r0, c7, c7, 0      /* invalidate I/D caches */
+    mcr p15, 0, r0, c8, c7, 0      /* invalidate unified TLB */
+    data_sync_barrier
+    instr_sync_barrier
+
+    mrc p15, 0, r0, c1, c0, 0
+    bic r0, r0, #0x2000            /* clear V (high vectors) */
+    bic r0, r0, #0x0200            /* clear RR (round-robin replacement) */
+    bic r0, r0, #0x0100            /* clear L4 */
+    bic r0, r0, #0x0080            /* clear I (instruction cache) */
+    bic r0, r0, #0x0004            /* clear C (data/unified cache) */
+    bic r0, r0, #0x0001            /* clear M (MMU) */
+    orr r0, r0, #0x00000002        /* keep alignment fault checking enabled */
+    mcr p15, 0, r0, c1, c0, 0
+    data_sync_barrier
+    instr_sync_barrier
+#endif
+
 #if defined(CONFIG_DCLS)
     /*
      * Initialise CPU registers to a defined state if the processor is
