@@ -21,6 +21,7 @@
 #include <zephyr/irq.h>
 
 #define BCM2711_MU_IO			0x00
+#define BCM2711_AUX_ENABLES		(-0x3c)
 #define BCM2711_MU_IER			0x04
 #define BCM2711_MU_IIR			0x08
 #define BCM2711_MU_LCR			0x0c
@@ -49,6 +50,8 @@
 
 #define BCM2711_MU_CNTL_RX_ENABLE	BIT(0)
 #define BCM2711_MU_CNTL_TX_ENABLE	BIT(1)
+
+#define BCM2711_AUX_ENABLES_MU		BIT(0)
 
 struct bcm2711_uart_config {
 	DEVICE_MMIO_ROM; /* Must be first */
@@ -94,6 +97,15 @@ static void bcm2711_mu_lowlevel_init(mem_addr_t base, bool skip_baudrate_config,
 			      uint32_t baudrate, uint32_t input_clock)
 {
 	uint32_t divider;
+
+	/*
+	 * The mini UART block sits inside the AUX peripheral block and its
+	 * registers are only accessible once the UART sub-block is enabled.
+	 * The AUX_ENABLES register is at a fixed offset before AUX_MU_IO on
+	 * BCM2711 and BCM2835-class parts.
+	 */
+	sys_write32(sys_read32(base + BCM2711_AUX_ENABLES) | BCM2711_AUX_ENABLES_MU,
+		    base + BCM2711_AUX_ENABLES);
 
 	/* Wait until there is data in the FIFO */
 	while (!bcm2711_mu_lowlevel_can_putc(base)) {

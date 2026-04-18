@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_RPI_ZERO_W
+	select SOC_BCM2835

@@ -22,6 +22,17 @@ config CPU_CORTEX_A7
 	help
 	  This option signifies the use of a Cortex-A7 CPU.
 
+config CPU_ARM1176JZF_S
+	bool
+	select CPU_AARCH32_CORTEX_A
+	select ARMV6_ARM1176
+	select ISA_ARM
+	select ATOMIC_OPERATIONS_BUILTIN
+	select CPU_HAS_ICACHE
+	select CPU_HAS_DCACHE
+	help
+	  This option signifies the use of an ARM1176JZF-S CPU.
+
 config CPU_CORTEX_A9
 	bool
 	select CPU_AARCH32_CORTEX_A
@@ -32,6 +43,11 @@ config CPU_CORTEX_A9
 	  This option signifies the use of a Cortex-A9 CPU.
 
 if CPU_AARCH32_CORTEX_A
+
+config ARMV6_ARM1176
+	bool
+	help
+	  This option signifies the use of an ARM1176-class ARMv6 CPU.
 
 config ARMV7_A
 	bool

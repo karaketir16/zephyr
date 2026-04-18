@@ -16,14 +16,14 @@
 #include <zephyr/linker/linker-defs.h>
 #include <zephyr/arch/common/init.h>
 
-#if defined(CONFIG_AARCH32_ARMV8_R)
+#if defined(CONFIG_AARCH32_ARMV8_R) || defined(CONFIG_ARMV6_ARM1176)
 
 #define VECTOR_ADDRESS ((uintptr_t)_vector_start)
 
 static inline void relocate_vector_table(void)
 {
-	write_sctlr(read_sctlr() & ~HIVECS);
-	write_vbar(VECTOR_ADDRESS & VBAR_MASK);
+	__set_SCTLR(__get_SCTLR() & ~HIVECS);
+	__set_VBAR(VECTOR_ADDRESS & VBAR_MASK);
 	barrier_isync_fence_full();
 }
 

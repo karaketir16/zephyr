@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <broadcom/bcm2835.dtsi>
+
+/ {
+	model = "Raspberry Pi Zero W";
+	compatible = "raspberrypi,zero-w", "brcm,bcm2835";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	chosen {
+		/* Temporary minimal bring-up target: timer + mini-UART only. */
+		zephyr,console = &uart1;
+		zephyr,shell-uart = &uart1;
+		zephyr,sram = &sram0;
+	};
+};
+
+&system_timer {
+	status = "okay";
+};
+
+&uart1 {
+	current-speed = <115200>;
+	status = "okay";
+};

@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm1176jzf-s";
+			reg = <0>;
+		};
+	};
+
+	interrupt-parent = <&intc>;
+
+	soc {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/*
+		 * Firmware typically loads the Pi 1 / Zero 32-bit kernel image at
+		 * 0x8000. Keep the initial Zephyr SRAM window anchored there for
+		 * the eventual board port.
+		 */
+		sram0: memory@8000 {
+			device_type = "memory";
+			compatible = "mmio-sram";
+			reg = <0x00008000 0x03ff8000>;
+		};
+
+		system_timer: timer@20003000 {
+			compatible = "brcm,bcm2835-system-timer";
+			reg = <0x20003000 0x1c>;
+			interrupts = <3>;
+			clock-frequency = <1000000>;
+			status = "disabled";
+		};
+
+		intc: interrupt-controller@2000b000 {
+			compatible = "brcm,bcm2835-armctrl-ic";
+			reg = <0x2000b000 0x224>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+			status = "okay";
+		};
+
+		uart0_clk: uart0-clk {
+			compatible = "fixed-clock";
+			clock-frequency = <48000000>;
+			#clock-cells = <0>;
+		};
+
+		uart0: uart@20201000 {
+			compatible = "arm,pl011";
+			reg = <0x20201000 0x200>;
+			interrupt-parent = <&intc>;
+			interrupts = <57>;
+			interrupt-names = "uart0";
+			clocks = <&uart0_clk>;
+			status = "disabled";
+		};
+
+		uart1: uart@20215040 {
+			compatible = "brcm,bcm2835-aux-uart",
+				     "brcm,bcm2711-aux-uart";
+			reg = <0x20215040 0x40>;
+			interrupt-parent = <&intc>;
+			interrupts = <29>;
+			clock-frequency = <250000000>;
+			status = "disabled";
+		};
+	};
+};
