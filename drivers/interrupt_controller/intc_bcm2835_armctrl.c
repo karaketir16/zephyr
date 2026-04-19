@@ -77,22 +77,31 @@ static inline uint32_t bcm2835_irq_bit(unsigned int irq)
 
 unsigned int z_soc_irq_get_active(void)
 {
-	uint32_t basic_pending;
 	uint32_t gpu_pending;
+	uint32_t basic_bits;
 
-	basic_pending = sys_read32(BCM2835_IRQ_BASIC_PENDING);
-	if ((basic_pending & GENMASK(7, 0)) != 0U) {
-		return BCM2835_BASIC_IRQ_BASE + u32_count_trailing_zeros(basic_pending & GENMASK(7, 0));
-	}
-
-	gpu_pending = sys_read32(BCM2835_IRQ_PENDING_1);
+	/*
+	 * Service GPU IRQ pending (IRQ_PENDING_1 / _2) before IRQ_BASIC_PENDING.
+	 * Linux irq-bcm2835.c documents that register 0x200 mixes ARM status bits,
+	 * shortcuts, and "check bank 1/2" flags — it is not eight independent
+	 * lines that should preempt GPU IRQ demux. Reading GPU banks first also
+	 * matches hardware priority for mini-UART (GPU irq 29) under QEMU.
+	 * Only bits enabled in software are considered.
+	 */
+	gpu_pending = sys_read32(BCM2835_IRQ_PENDING_1) & bcm2835_enabled_gpu1;
 	if (gpu_pending != 0U) {
 		return u32_count_trailing_zeros(gpu_pending);
 	}
 
-	gpu_pending = sys_read32(BCM2835_IRQ_PENDING_2);
+	gpu_pending = sys_read32(BCM2835_IRQ_PENDING_2) & bcm2835_enabled_gpu2;
 	if (gpu_pending != 0U) {
 		return 32U + u32_count_trailing_zeros(gpu_pending);
+	}
+
+	basic_bits = (sys_read32(BCM2835_IRQ_BASIC_PENDING) & GENMASK(7, 0)) &
+		     bcm2835_enabled_basic;
+	if (basic_bits != 0U) {
+		return BCM2835_BASIC_IRQ_BASE + u32_count_trailing_zeros(basic_bits);
 	}
 
 	return BCM2835_SPURIOUS_IRQ;
