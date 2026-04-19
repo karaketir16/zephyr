@@ -2,8 +2,9 @@ Raspberry Pi Zero W Port Notes
 ##############################
 
 This note is the current handoff summary for the Zephyr Raspberry Pi Zero W
-port. The goal so far has been the minimal path toward boot and
-``samples/hello_world``: reset, vectors, interrupt controller, timer, and UART.
+port. The goal so far has been the minimal path toward boot and first useful
+UART validation with ``samples/hello_world`` and ``samples/drivers/uart/echo_bot``:
+reset, vectors, interrupt controller, timer, and UART.
 
 Current State
 *************
@@ -11,6 +12,8 @@ Current State
 - ``rpi_zero_w/bcm2835`` now builds successfully and produces ``zephyr.elf``.
 - ``samples/hello_world`` has now been observed on real Raspberry Pi Zero W
   hardware over the mini-UART console.
+- ``samples/drivers/uart/echo_bot`` now works under QEMU ``raspi0`` with RX
+  and TX over the BCM2835 AUX mini-UART path.
 - This is now beyond compile-only and QEMU-only bring-up, but it is still not
   a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
@@ -48,6 +51,8 @@ The following pieces now exist in-tree:
 
 - ARM1176 reset entry cleanup in ``reset.S`` so early boot no longer assumes
   inherited firmware state is already suitable for Zephyr.
+- ``cortex_a_r/isr_wrapper.S`` now keeps IRQs masked while dispatching ISRs
+  when ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER`` is in use.
 
 Important Behavioral Changes
 ****************************
@@ -67,6 +72,13 @@ Important Behavioral Changes
 
 - ``rpi_zero_w`` now disables ``CONFIG_TICKLESS_KERNEL`` explicitly because the
   BCM2835 timer driver currently implements only a simple periodic tick source.
+- The shared ``cortex_a_r`` IRQ wrapper no longer re-enables IRQs before the
+  device-level interrupt source has been cleared on BCM2835. Under QEMU this
+  had allowed immediate recursive re-entry on level-triggered IRQ sources,
+  eventually overflowing the exception stack and corrupting RAM-backed text.
+  Keeping IRQs masked for custom interrupt-controller paths fixed that issue
+  and allowed both timer IRQ delivery and mini-UART RX interrupts to run
+  normally.
 
 Ground Truth Used
 *****************
@@ -141,6 +153,43 @@ Observed result under QEMU ``raspi0``:
 - console init reaches ``uart_console_init``
 - ``samples/hello_world`` reaches ``main()``
 - QEMU prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
+
+The current verified ``echo_bot`` build command is:
+
+.. code-block:: sh
+
+   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
+     zephyr/samples/drivers/uart/echo_bot \
+     -d /tmp/zephyr-rpi-zero-w-echo-bot-build -p always
+
+The current verified ``echo_bot`` QEMU boot command is:
+
+.. code-block:: sh
+
+   qemu-system-arm -M raspi0 -display none -monitor none \
+     -serial null -serial stdio \
+     -kernel /tmp/zephyr-rpi-zero-w-echo-bot-build/zephyr/zephyr.elf
+
+Observed result under QEMU ``raspi0`` for ``echo_bot``:
+
+- QEMU prints the Zephyr banner and the ``echo_bot`` prompt
+- the BCM2835 system timer IRQ fires and reaches the Zephyr timer path
+- AUX mini-UART RX IRQ delivery now reaches both ``uart_isr`` and
+  ``serial_cb``
+- entering a line such as ``hello`` prints ``Echo: hello``
+
+The current verified GDB-assisted root cause for the earlier failed
+``echo_bot`` RX path is:
+
+- the failure was not a QEMU console-slot mismatch once TX output was visible
+- the first real problem was recursive IRQ re-entry in the shared
+  ``cortex_a_r`` IRQ wrapper when used with the BCM2835 custom interrupt
+  controller path
+- that recursion eventually overflowed the exception stack and corrupted
+  RAM-backed text, leading to undefined-instruction faults inside code that was
+  otherwise valid in the ELF image
+- masking IRQs during ISR dispatch for
+  ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER`` fixed the issue in QEMU
 
 Important QEMU console detail:
 
@@ -249,6 +298,7 @@ What Is Not Verified Yet
 - Timer interrupt delivery on hardware
 - ARMCTRL interrupt handling on hardware
 - Exception entry and return behavior on hardware
+- ``echo_bot`` RX/TX behavior on real Raspberry Pi Zero W hardware
 
 Open Risks
 **********
@@ -259,6 +309,8 @@ Open Risks
   incremental adaptation rather than a dedicated ARM11 architecture path.
 - The current timer and interrupt-controller drivers are suitable for early
   bring-up, but they have not been stress-tested or hardware-validated.
+- The recursive IRQ re-entry bug seen in QEMU has been fixed in the shared
+  wrapper, but that path still needs real hardware validation on ARM1176.
 - The current board no longer depends on firmware UART pin muxing for the
   mini-UART console path, but BCM2835 pinctrl coverage is still far from
   complete.
@@ -274,15 +326,15 @@ Work in this order unless new hardware results force a change:
 1. Continue reducing ARM1176-specific assumptions inside the shared
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.
-2. Validate timer interrupt delivery and BCM2835 ARMCTRL behavior further now
-   that both QEMU and real Pi Zero W hardware reach ``main()`` and print over
-   the mini-UART path.
+2. Validate the now-working timer IRQ and mini-UART RX interrupt path on real
+   Raspberry Pi Zero W hardware, not only under QEMU.
 3. After first hardware console success, keep testing the minimal chain:
 
    - reset
    - vectors
    - periodic timer tick
    - mini-UART console
+   - mini-UART RX echo path
 
 4. After stable tick/IRQ behavior, decide whether to:
 

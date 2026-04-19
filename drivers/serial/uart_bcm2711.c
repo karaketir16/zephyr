@@ -69,6 +69,7 @@ struct bcm2711_uart_data {
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	uart_irq_callback_user_data_t callback;
 	void *cb_data;
+	bool isr_trace_printed;
 #endif
 };
 
@@ -294,6 +295,11 @@ void uart_isr(const struct device *dev)
 {
 	struct bcm2711_uart_data *data = dev->data;
 
+	if (!data->isr_trace_printed) {
+		data->isr_trace_printed = true;
+		printk("DBG: uart irq\n");
+	}
+
 	if (data->callback) {
 		data->callback(dev, data->cb_data);
 	}
@@ -327,10 +333,15 @@ static DEVICE_API(uart, uart_bcm2711_driver_api) = {
 
 #define UART_BCM2711_IRQ_CONF_FUNC_SET(port) .irq_config_func = irq_config_func_##port,
 
+#define UART_BCM2711_IRQ_PRIO(port)                                                           \
+	COND_CODE_1(DT_INST_IRQ_HAS_CELL(port, priority),                                     \
+		    (DT_INST_IRQ(port, priority)),                                            \
+		    (0))
+
 #define UART_BCM2711_IRQ_CONF_FUNC(port)                                                           \
 	static void irq_config_func_##port(const struct device *dev)                               \
 	{                                                                                          \
-		IRQ_CONNECT(DT_INST_IRQN(port), DT_INST_IRQ(port, priority), uart_isr,             \
+		IRQ_CONNECT(DT_INST_IRQN(port), UART_BCM2711_IRQ_PRIO(port), uart_isr,           \
 			    DEVICE_DT_INST_GET(port), 0);                                          \
 		irq_enable(DT_INST_IRQN(port));                                                    \
 	}

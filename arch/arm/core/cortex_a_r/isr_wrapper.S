@@ -193,8 +193,16 @@ _idle_state_cleared:
 	 * interrupts are handled after the active interrupt is acknowledged;
 	 * this is be done through the `get_active` interrupt controller
 	 * interface function.
+	 *
+	 * Custom SoC interrupt controllers may only report a pending source
+	 * here without performing an acknowledge/deactivate operation. For
+	 * level-triggered sources such as BCM2835 system timer and AUX UART,
+	 * re-enabling IRQs before the ISR clears the device-level pending bit
+	 * can cause immediate recursive re-entry and exception-stack overflow.
 	 */
+#if !defined(CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER)
 	cpsie i
+#endif
 
 	/*
 	 * Skip calling the isr if it is a spurious interrupt.
@@ -312,10 +320,16 @@ _idle_state_cleared:
 
 	/*
 	 * Enable and disable interrupts again to allow nested in exception handlers.
+	 * See note above: keep IRQs masked for custom interrupt controllers
+	 * whose get_active path does not acknowledge the active source.
 	 */
+#if !defined(CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER)
 	cpsie i
 	blx r3		/* call ISR */
 	cpsid i
+#else
+	blx r3		/* call ISR */
+#endif
 
 spurious_continue:
 	/* Signal end-of-interrupt */

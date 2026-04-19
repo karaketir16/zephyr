@@ -33,6 +33,7 @@ const int32_t z_sys_timer_irq_for_test = BCM2835_STIMER_IRQN;
 static struct k_spinlock lock;
 static uint32_t cycles_per_tick;
 static uint32_t last_cycle;
+static bool timer_trace_printed;
 
 static void bcm2835_system_timer_isr(const void *arg)
 {
@@ -56,6 +57,11 @@ static void bcm2835_system_timer_isr(const void *arg)
 	sys_write32(last_cycle + cycles_per_tick, BCM2835_STIMER_C3);
 
 	k_spin_unlock(&lock, key);
+
+	if (!timer_trace_printed) {
+		timer_trace_printed = true;
+		printk("DBG: timer irq\n");
+	}
 
 	sys_clock_announce(delta_ticks);
 }

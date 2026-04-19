@@ -23,6 +23,9 @@ static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 /* receive buffer used in UART ISR callback */
 static char rx_buf[MSG_SIZE];
 static int rx_buf_pos;
+static bool serial_cb_trace_printed;
+
+void print_uart(char *buf);
 
 /*
  * Read characters from UART until line end is detected. Afterwards push the
@@ -32,12 +35,20 @@ void serial_cb(const struct device *dev, void *user_data)
 {
 	uint8_t c;
 
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+
 	if (!uart_irq_update(uart_dev)) {
 		return;
 	}
 
 	if (!uart_irq_rx_ready(uart_dev)) {
 		return;
+	}
+
+	if (!serial_cb_trace_printed) {
+		serial_cb_trace_printed = true;
+		print_uart("DBG: serial_cb\r\n");
 	}
 
 	/* read until FIFO empty */
