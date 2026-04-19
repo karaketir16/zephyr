@@ -1,0 +1,18 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		led1 = &ext_led1;
+	};
+
+	leds {
+		ext_led1: led_1 {
+			gpios = <&gpio0 27 GPIO_ACTIVE_HIGH>;
+			label = "LED1";
+		};
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
