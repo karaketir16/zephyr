@@ -36,6 +36,24 @@
 		pinctrl: pin-controller@20200000 {
 			compatible = "brcm,bcm2835-pinctrl";
 			reg = <0x20200000 0xb4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/*
+			 * Expose the upper GPIO bank first because the Pi Zero W ACT LED
+			 * lives on GPIO47. This keeps initial GPIO enablement minimal while
+			 * still allowing real-hardware LED validation with blinky.
+			 */
+			gpio2: gpio@2e {
+				compatible = "brcm,bcm2711-gpio";
+				reg = <46>;
+				interrupt-parent = <&intc>;
+				interrupts = <50>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				ngpios = <8>;
+				status = "disabled";
+			};
 		};
 
 		system_timer: timer@20003000 {
