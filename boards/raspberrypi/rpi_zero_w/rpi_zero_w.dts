@@ -6,6 +6,7 @@
 
 /dts-v1/;
 
+#include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/pinctrl/brcm-bcm2835-pinctrl.h>
 #include <broadcom/bcm2835.dtsi>
 
@@ -15,11 +16,24 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+	aliases {
+		led0 = &act_led;
+	};
+
 	chosen {
 		/* Temporary minimal bring-up target: timer + mini-UART only. */
 		zephyr,console = &uart1;
 		zephyr,shell-uart = &uart1;
 		zephyr,sram = &sram0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		act_led: led_0 {
+			gpios = <&gpio2 1 GPIO_ACTIVE_LOW>;
+			label = "ACT";
+		};
 	};
 };
 
@@ -38,6 +52,10 @@
 };
 
 &system_timer {
+	status = "okay";
+};
+
+&gpio2 {
 	status = "okay";
 };
 

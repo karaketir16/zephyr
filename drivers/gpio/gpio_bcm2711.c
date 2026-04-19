@@ -335,7 +335,11 @@ static DEVICE_API(gpio, gpio_bcm2711_api) = {
                                                                                                    \
 	static void gpio_bcm2711_irq_config_func_##n(void)                                         \
 	{                                                                                          \
-		IRQ_CONNECT(DT_INST_IRQN(n), DT_INST_IRQ(n, priority), gpio_bcm2711_isr,           \
+		IRQ_CONNECT(DT_INST_IRQN(n),                                                   \
+			    COND_CODE_1(DT_INST_IRQ_HAS_CELL(n, priority),                       \
+					(DT_INST_IRQ(n, priority)),                             \
+					(0)),                                                \
+			    gpio_bcm2711_isr,                                               \
 			    DEVICE_DT_INST_GET(n), 0);                                             \
 		irq_enable(DT_INST_IRQN(n));                                                       \
 	}                                                                                          \
