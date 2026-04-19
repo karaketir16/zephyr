@@ -1,0 +1,27 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	aliases {
+		sw0 = &button0;
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		polling-mode;
+
+		/*
+		 * Temporary external button for bring-up:
+		 * wire physical pin 11 (GPIO17) to GND through a momentary switch.
+		 */
+		button0: button_0 {
+			gpios = <&gpio0 17 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "SW0";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};

@@ -39,13 +39,24 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
+			gpio0: gpio@0 {
+				compatible = "brcm,bcm2835-gpio";
+				reg = <0>;
+				interrupt-parent = <&intc>;
+				interrupts = <49>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				ngpios = <28>;
+				status = "disabled";
+			};
+
 			/*
 			 * Expose the upper GPIO bank first because the Pi Zero W ACT LED
 			 * lives on GPIO47. This keeps initial GPIO enablement minimal while
 			 * still allowing real-hardware LED validation with blinky.
 			 */
 			gpio2: gpio@2e {
-				compatible = "brcm,bcm2711-gpio";
+				compatible = "brcm,bcm2835-gpio";
 				reg = <46>;
 				interrupt-parent = <&intc>;
 				interrupts = <50>;
