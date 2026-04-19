@@ -9,8 +9,10 @@ Current State
 *************
 
 - ``rpi_zero_w/bcm2835`` now builds successfully and produces ``zephyr.elf``.
-- This is still a compile-valid and partially boot-oriented port, not a
-  hardware-validated board port yet.
+- ``samples/hello_world`` has now been observed on real Raspberry Pi Zero W
+  hardware over the mini-UART console.
+- This is now beyond compile-only and QEMU-only bring-up, but it is still not
+  a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
   completeness. GPIO, Wi-Fi, Bluetooth, pinctrl completeness, and MMU support
   are all secondary.
@@ -35,6 +37,8 @@ The following pieces now exist in-tree:
 - BCM2835 system timer driver in
   ``drivers/timer/bcm2835_system_timer.c``.
 - BCM2835 mini-UART reuse through the existing Broadcom AUX mini-UART driver.
+- Minimal BCM2835 pinctrl support for Pi Zero W mini-UART GPIO14/GPIO15 muxing
+  and pull configuration.
 - ARM1176JZF-S CPU selection and ``-mcpu=arm1176jzf-s`` toolchain mapping.
 - ARM1176-specific compile fixes in the shared ``cortex_a_r`` path for:
 
@@ -95,14 +99,15 @@ finished port:
 - ``soc/brcm/bcm2835/pinctrl_soc.h`` is a stub.
 - ``soc/brcm/bcm2835/pinctrl_stub.c`` provides a no-op
   ``pinctrl_configure_pins()``.
-- The current UART path assumes firmware-configured pins rather than a Zephyr
-  BCM2835 pinctrl driver.
+- The current BCM2835 pinctrl support is intentionally minimal and only covers
+  the Pi Zero W mini-UART bring-up path on GPIO14/GPIO15.
 - ``drivers/interrupt_controller/intc_bcm2835_armctrl.c`` is a first-pass
   driver aimed at minimal bring-up.
 - ``drivers/timer/bcm2835_system_timer.c`` is a first-pass periodic timer
   driver. Timeout reprogramming and richer timer behavior are not implemented.
-- ``rpi_zero_w`` should still be treated as experimental until hardware boot is
-  demonstrated.
+- ``rpi_zero_w`` should still be treated as experimental until timer IRQ
+  delivery and broader hardware behavior are validated beyond first console
+  output.
 
 What Has Been Verified
 **********************
@@ -121,11 +126,126 @@ Result:
 - linking succeeds
 - ``zephyr/zephyr.elf`` is produced for ``rpi_zero_w/bcm2835``
 
+The current verified QEMU boot command is:
+
+.. code-block:: sh
+
+   qemu-system-arm -M raspi0 -display none -monitor none \
+     -serial null -serial stdio \
+     -kernel /tmp/zephyr-rpi-zero-w-build/zephyr/zephyr.elf
+
+Observed result under QEMU ``raspi0``:
+
+- reset reaches ``z_arm_reset``
+- early arch setup reaches ``z_cstart``
+- console init reaches ``uart_console_init``
+- ``samples/hello_world`` reaches ``main()``
+- QEMU prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
+
+Important QEMU console detail:
+
+- In QEMU's BCM2835 model, PL011 ``uart0`` is wired to ``serial_hd(0)``
+  while AUX mini-UART ``uart1`` is wired to ``serial_hd(1)``.
+- Because the current Zephyr board uses ``uart1`` as ``zephyr,console``,
+  a simple ``-serial stdio`` test targets the wrong UART.
+- For the current board, the working QEMU console setup is
+  ``-serial null -serial stdio`` so stdio is attached to QEMU serial slot 1.
+
+The current verified raw-image QEMU boot command is:
+
+.. code-block:: sh
+
+   qemu-system-arm -M raspi0 -display none -monitor none \
+     -serial null -serial stdio \
+     -bios /tmp/zephyr-rpi-zero-w-build/zephyr/zephyr.bin
+
+Observed result under that raw-image path:
+
+- QEMU also prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
+- ``zephyr.bin`` is therefore confirmed usable as a Pi-style flat kernel image
+
+The current verified real-hardware result is:
+
+- Pi Zero W boots from SD card with the Zephyr raw image
+- serial console at 115200 8N1 prints the Zephyr banner
+- serial console prints ``Hello World! rpi_zero_w/bcm2835``
+
+SD Card Boot Guide
+******************
+
+The current bring-up recipe for real Pi Zero W hardware is:
+
+1. Build the sample:
+
+   .. code-block:: sh
+
+      env CCACHE_DISABLE=1 west build -b rpi_zero_w zephyr/samples/hello_world \
+        -d /tmp/zephyr-rpi-zero-w-build -p always
+
+2. Use the generated raw binary:
+
+   - ``/tmp/zephyr-rpi-zero-w-build/zephyr/zephyr.bin``
+
+3. Copy that binary to the FAT boot partition under a Pi firmware-visible name,
+   for example:
+
+   - ``kernel_zephyr.img``
+
+4. Add the following lines to ``config.txt`` on the boot partition:
+
+   .. code-block:: ini
+
+      [all]
+      kernel=kernel_zephyr.img
+      enable_uart=1
+
+5. Insert the SD card into the Pi Zero W and power the board normally.
+
+Notes:
+
+- The current board uses the AUX mini-UART path, not PL011.
+- The current image does not rely on Linux, U-Boot, or an initramfs.
+- ``cmdline.txt`` is not used by this Zephyr ``hello_world`` bring-up path.
+- Existing Raspberry Pi firmware files such as ``bootcode.bin``, ``start.elf``,
+  ``fixup.dat``, and the standard overlays should remain on the boot
+  partition.
+
+Serial Console Guide
+********************
+
+Use a 3.3 V TTL USB-UART adapter only.
+
+Wire the Pi Zero W header as follows:
+
+- Pi pin 8 / GPIO14 TX -> USB-UART RX
+- Pi pin 10 / GPIO15 RX -> USB-UART TX
+- Pi GND -> USB-UART GND
+
+Serial settings:
+
+- 115200 baud
+- 8 data bits
+- no parity
+- 1 stop bit
+- no hardware flow control
+
+Important:
+
+- Do not connect 5 V UART signals to the Raspberry Pi GPIO header.
+- Do not connect the adapter's VCC pin unless you intentionally want to power
+  the board from that adapter.
+- Normal USB power into the Pi is the safer default.
+
+Expected first successful output:
+
+.. code-block:: text
+
+   *** Booting Zephyr OS build ...
+   Hello World! rpi_zero_w/bcm2835
+
 What Is Not Verified Yet
 ************************
 
-- Boot on real Raspberry Pi Zero W hardware
-- UART output on hardware
 - Timer interrupt delivery on hardware
 - ARMCTRL interrupt handling on hardware
 - Exception entry and return behavior on hardware
@@ -139,8 +259,12 @@ Open Risks
   incremental adaptation rather than a dedicated ARM11 architecture path.
 - The current timer and interrupt-controller drivers are suitable for early
   bring-up, but they have not been stress-tested or hardware-validated.
-- The board currently depends on firmware UART pin setup because BCM2835
-  pinctrl is not implemented yet.
+- The current board no longer depends on firmware UART pin muxing for the
+  mini-UART console path, but BCM2835 pinctrl coverage is still far from
+  complete.
+- QEMU ``raspi0`` is now good enough to validate the current reset, timer,
+  interrupt-controller, and mini-UART boot path, but it is still not a
+  substitute for real Pi Zero W hardware validation.
 
 Recommended Next Steps
 **********************
@@ -150,24 +274,24 @@ Work in this order unless new hardware results force a change:
 1. Continue reducing ARM1176-specific assumptions inside the shared
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.
-2. Validate that the BCM2835 ARMCTRL hooks match what the ARM1176 interrupt
-   path expects once hardware testing begins.
-3. Boot-test ``samples/hello_world`` on real Pi Zero W hardware with only the
-   minimal chain enabled:
+2. Validate timer interrupt delivery and BCM2835 ARMCTRL behavior further now
+   that both QEMU and real Pi Zero W hardware reach ``main()`` and print over
+   the mini-UART path.
+3. After first hardware console success, keep testing the minimal chain:
 
    - reset
    - vectors
    - periodic timer tick
    - mini-UART console
 
-4. After first UART output and stable tick/IRQ behavior, decide whether to:
+4. After stable tick/IRQ behavior, decide whether to:
 
    - continue with incremental ARM1176 support inside the shared path, or
    - split out a dedicated ARM11 path under ``arch/arm``
 
-5. Only after first boot should follow-up work expand into:
+5. With first hardware boot now achieved, follow-up work can expand into:
 
-   - BCM2835 pinctrl
+   - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - GPIO support
    - PL011 selection options
    - less minimal timer behavior

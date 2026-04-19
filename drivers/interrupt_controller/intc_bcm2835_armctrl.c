@@ -107,8 +107,11 @@ void z_soc_irq_eoi(unsigned int irq)
 
 void z_soc_irq_init(void)
 {
-	k_spinlock_key_t key = k_spin_lock(&bcm2835_armctrl_lock);
-
+	/*
+	 * Early interrupt-controller init runs before scheduler start on the
+	 * current single-core BCM2835 bring-up path, so no concurrent access
+	 * exists yet.
+	 */
 	sys_write32(0U, BCM2835_FIQ_CONTROL);
 	sys_write32(UINT32_MAX, BCM2835_DISABLE_IRQS_1);
 	sys_write32(UINT32_MAX, BCM2835_DISABLE_IRQS_2);
@@ -117,8 +120,6 @@ void z_soc_irq_init(void)
 	bcm2835_enabled_gpu1 = 0U;
 	bcm2835_enabled_gpu2 = 0U;
 	bcm2835_enabled_basic = 0U;
-
-	k_spin_unlock(&bcm2835_armctrl_lock, key);
 }
 
 void z_soc_irq_priority_set(unsigned int irq, unsigned int prio, uint32_t flags)

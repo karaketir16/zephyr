@@ -6,6 +6,7 @@
 
 /dts-v1/;
 
+#include <zephyr/dt-bindings/pinctrl/brcm-bcm2835-pinctrl.h>
 #include <broadcom/bcm2835.dtsi>
 
 / {
@@ -22,11 +23,27 @@
 	};
 };
 
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <BCM2835_PINMUX(14, BCM2835_ALT5)>;
+			bias-disable;
+		};
+
+		group2 {
+			pinmux = <BCM2835_PINMUX(15, BCM2835_ALT5)>;
+			bias-pull-up;
+		};
+	};
+};
+
 &system_timer {
 	status = "okay";
 };
 
 &uart1 {
 	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
 	status = "okay";
 };

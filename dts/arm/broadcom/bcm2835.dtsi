@@ -33,6 +33,11 @@
 			reg = <0x00008000 0x03ff8000>;
 		};
 
+		pinctrl: pin-controller@20200000 {
+			compatible = "brcm,bcm2835-pinctrl";
+			reg = <0x20200000 0xb4>;
+		};
+
 		system_timer: timer@20003000 {
 			compatible = "brcm,bcm2835-system-timer";
 			reg = <0x20003000 0x1c>;
