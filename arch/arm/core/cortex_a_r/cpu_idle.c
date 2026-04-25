@@ -12,6 +12,7 @@
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/tracing/tracing.h>
 
 #if defined(CONFIG_ARM_ON_EXIT_CPU_IDLE)
@@ -29,7 +30,7 @@
 		if (z_arm_on_enter_cpu_idle()) {                                                   \
 			/* Wait for all memory transaction to complete */                          \
 			/* before entering low power state. */                                     \
-			__DSB();                                                                   \
+			barrier_dsync_fence_full();                                                \
 			wait_instr();                                                              \
 			/* Inline the macro provided by SoC-specific code */                       \
 			ON_EXIT_IDLE_HOOK;                                                         \
@@ -38,7 +39,7 @@
 #else
 #define SLEEP_IF_ALLOWED(wait_instr)                                                               \
 	do {                                                                                       \
-		__DSB();                                                                           \
+		barrier_dsync_fence_full();                                                        \
 		wait_instr();                                                                      \
 		ON_EXIT_IDLE_HOOK;                                                                 \
 	} while (false)
@@ -59,7 +60,7 @@ void arch_cpu_idle(void)
 	 * the wake-up interrupt.
 	 */
 	__enable_irq();
-	__ISB();
+	barrier_isync_fence_full();
 }
 #endif
 

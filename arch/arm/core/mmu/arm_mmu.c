@@ -527,6 +527,8 @@ static void arm_mmu_remap_l1_section_to_l2_table(uint32_t va,
 
 	reg_val = __get_SCTLR();
 	__set_SCTLR(reg_val & (~ARM_MMU_SCTLR_MMU_ENABLE_BIT));
+	/* ISB required after SCTLR change (ARM ARM: context-changing instruction). */
+	barrier_isync_fence_full();
 
 	/*
 	 * Clear the entire L1 PTE & re-configure it as a L2 PT reference
@@ -553,6 +555,8 @@ static void arm_mmu_remap_l1_section_to_l2_table(uint32_t va,
 
 	invalidate_tlb_all();
 	__set_SCTLR(reg_val);
+	/* ISB required after re-enabling MMU via SCTLR (ARM ARM requirement). */
+	barrier_isync_fence_full();
 
 	arch_irq_unlock(lock_key);
 }
@@ -878,24 +882,36 @@ int z_arm_mmu_init(void)
 	/* Enable the MMU and Cache in SCTLR */
 	reg_val  = __get_SCTLR();
 #ifdef CONFIG_ARMV6_ARM1176
-	L1C_InvalidateICacheAll();
 	/*
-	 * CMSIS L1C_InvalidateDCacheAll() reads the CLIDR register
-	 * (MRC p15, 1, r0, c0, c0, 1) which is ARMv7-only and causes
-	 * an Undefined Instruction exception on ARM1176 (ARMv6).
-	 * Use the ARM1176 TRM c7.c6.0 whole-cache invalidation instead.
+	 * Invalidate I-cache and D-cache before enabling them.
+	 *   c7,c5,0  = Invalidate entire I-cache (ARM1176 TRM B2.7.5)
+	 *   c7,c14,0 = Clean+invalidate entire D-cache (ARM1176 TRM B2.7.7)
+	 * Use direct MCR instead of CMSIS L1C_Invalidate*() because those
+	 * helpers call __DSB()/__ISB() which emit the ARMv7-only 'dsb'/'isb'
+	 * mnemonics, rejected by the assembler with -mcpu=arm1176jzf-s.
+	 * Follow with a write-buffer drain (DSB) per Linux arch/arm/mm/proc-v6.S.
 	 */
-	__asm__ volatile("mcr p15, 0, %0, c7, c6, 0" : : "r"(0) : "memory");
+	__asm__ volatile("mcr p15, 0, %0, c7, c5, 0"  : : "r"(0) : "memory");
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 0" : : "r"(0) : "memory");
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
 	reg_val |= ARM_MMU_SCTLR_XP_BIT;
-	reg_val |= ARM_MMU_SCTLR_ICACHE_ENABLE_BIT;
-	reg_val |= ARM_MMU_SCTLR_DCACHE_ENABLE_BIT;
 #else
+	L1C_InvalidateICacheAll();
+	L1C_InvalidateDCacheAll();
 	reg_val |= ARM_MMU_SCTLR_AFE_BIT;
+#endif
 	reg_val |= ARM_MMU_SCTLR_ICACHE_ENABLE_BIT;
 	reg_val |= ARM_MMU_SCTLR_DCACHE_ENABLE_BIT;
-#endif
 	reg_val |= ARM_MMU_SCTLR_MMU_ENABLE_BIT;
 	__set_SCTLR(reg_val);
+	/*
+	 * ARM Architecture Reference Manual requires an ISB after writing
+	 * SCTLR to enable the MMU, to ensure subsequent instructions are
+	 * fetched and decoded using the new translation state.
+	 * Linux implements this in __turn_mmu_on (head.S) via instr_sync
+	 * + a read of the ID register to force pipeline flush.
+	 */
+	barrier_isync_fence_full();
 
 	return 0;
 }
