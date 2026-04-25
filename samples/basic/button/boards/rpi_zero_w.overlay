@@ -8,10 +8,9 @@
 
 	buttons {
 		compatible = "gpio-keys";
-		polling-mode;
 
 		/*
-		 * Temporary external button for bring-up:
+		 * Temporary external button for bring-up and GPIO IRQ validation:
 		 * wire physical pin 11 (GPIO17) to GND through a momentary switch.
 		 */
 		button0: button_0 {
