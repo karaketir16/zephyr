@@ -55,7 +55,7 @@ void arch_dcache_enable(void)
 	/* Check if cache is already enabled */
 	if (val & SCTLR_C_Msk) {
 		/* Cache already enabled - clean and invalidate to ensure coherency */
-		L1C_CleanInvalidateDCacheAll();
+		arch_dcache_flush_and_invd_all();
 		return;
 	}
 
@@ -72,7 +72,7 @@ void arch_dcache_disable(void)
 {
 	uint32_t val;
 
-	L1C_CleanInvalidateDCacheAll();
+	arch_dcache_flush_and_invd_all();
 
 	val = __get_SCTLR();
 	val &= ~SCTLR_C_Msk;
@@ -83,22 +83,37 @@ void arch_dcache_disable(void)
 
 int arch_dcache_flush_all(void)
 {
+#ifdef CONFIG_ARMV6_ARM1176
+	/* ARM1176 TRM B2.7.6: Clean entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
+#else
 	L1C_CleanDCacheAll();
-
+#endif
 	return 0;
 }
 
 int arch_dcache_invd_all(void)
 {
+#ifdef CONFIG_ARMV6_ARM1176
+	/* ARM1176 TRM B2.7.4: Invalidate entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c6, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
+#else
 	L1C_InvalidateDCacheAll();
-
+#endif
 	return 0;
 }
 
 int arch_dcache_flush_and_invd_all(void)
 {
+#ifdef CONFIG_ARMV6_ARM1176
+	/* ARM1176 TRM B2.7.7: Clean+invalidate entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
+#else
 	L1C_CleanInvalidateDCacheAll();
-
+#endif
 	return 0;
 }
 
@@ -189,7 +204,7 @@ void arch_icache_enable(void)
 	/* Check if cache is already enabled */
 	if (val & SCTLR_I_Msk) {
 		/* I-cache already enabled - invalidate to ensure coherency */
-		L1C_InvalidateICacheAll();
+		arch_icache_invd_all();
 		return;
 	}
 
@@ -212,8 +227,13 @@ int arch_icache_flush_all(void)
 
 int arch_icache_invd_all(void)
 {
+#ifdef CONFIG_ARMV6_ARM1176
+	/* ARM1176 TRM B2.7.5: Invalidate entire I-cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c5, 0" : : "r"(0) : "memory");
+	barrier_isync_fence_full();
+#else
 	L1C_InvalidateICacheAll();
-
+#endif
 	return 0;
 }
 
@@ -238,9 +258,7 @@ int arch_icache_invd_range(void *start_addr, size_t size)
 	 * the instruction cache, but not currently supported by CMSIS.
 	 * For now, invalidate the entire cache.
 	 */
-	L1C_InvalidateICacheAll();
-
-	return 0;
+	return arch_icache_invd_all();
 }
 
 int arch_icache_flush_and_invd_range(void *start_addr, size_t size)

@@ -49,11 +49,20 @@ Current State
 - ``samples/kernel/condition_variables/condvar`` now works on real Raspberry Pi
   Zero W hardware. The waiter wakes at the configured threshold and the sample
   ends with the expected final count of ``145``.
+- ``tests/kernel/mem_protect/mem_map`` (``mem_map`` suite, 5 tests) now passes
+  on real Raspberry Pi Zero W hardware, including the execute-permission test
+  which correctly triggers a PREFETCH ABORT when jumping into an XN-mapped page.
+  This validates the full ``arch_mem_map()`` / ``arch_mem_unmap()`` runtime path
+  end-to-end on hardware.  QEMU ``raspi0`` does not model the XN bit so the exec
+  test fails there; the remaining four tests pass under QEMU.
+- The ARM1176 MMU bring-up milestone is now complete for bare-metal kernel-space
+  use.  ``CONFIG_USERSPACE`` and per-thread address-space management are the next
+  major MMU topic but are deferred as a separate project.
 - This is now beyond compile-only and QEMU-only bring-up, but it is still not
   a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
-  completeness. GPIO, Wi-Fi, Bluetooth, pinctrl completeness, and MMU support
-  are all secondary.
+  completeness. GPIO, Wi-Fi, Bluetooth, and pinctrl completeness are still
+  secondary.
 
 What Has Landed
 ***************
@@ -103,6 +112,54 @@ The following pieces now exist in-tree:
   ``CONFIG_ATOMIC_OPERATIONS_C`` so the current bring-up no longer depends on
   ``LDREX/STREX`` in a no-MMU execution model where exclusive accesses are not
   yet safe.
+- ARM1176-specific barrier implementations added to
+  ``include/zephyr/arch/arm/barrier.h``:
+  ``ISB``/``DSB``/``DMB`` mnemonics are ARMv7-only and are rejected by the
+  assembler with ``-mcpu=arm1176jzf-s``.  The ARM1176 equivalents
+  (``MCR p15, 0, r0, c7, c5, 4`` / ``c7, c10, 4`` / ``c7, c10, 5``) are now
+  provided by overriding the ``z_barrier_*`` functions in the Zephyr-owned
+  ARM barrier header so that the third-party CMSIS ``cmsis_gcc.h`` does not
+  need to be modified.
+- ``cortex_a_r/cpu_idle.c`` updated to use ``barrier_dsync_fence_full()`` and
+  ``barrier_isync_fence_full()`` instead of the CMSIS ``__DSB()``/``__ISB()``
+  calls, which were the remaining source of ``dsb 0xF``/``isb 0xF`` assembler
+  errors on the ARM1176 target.
+- ``arch/arm/core/mmu/arm_mmu.c`` ARM1176 cache init sequence improved
+  following analysis of Linux ``arch/arm/mm/proc-v6.S __v6_setup``:
+
+  - ``L1C_InvalidateICacheAll()`` removed; it called CMSIS ``__DSB()`` and
+    ``__ISB()`` internally, which do not assemble on ARM1176.  Replaced with
+    direct ``MCR p15, 0, r0, c7, c5, 0`` (invalidate I-cache).
+  - D-cache operation changed from invalidate-only (``c7, c6, 0``) to
+    clean+invalidate (``c7, c14, 0``) for robustness on warm resets.
+  - Write-buffer drain (``MCR p15, 0, r0, c7, c10, 4``) added after cache
+    invalidation, matching the Linux ``proc-v6.S`` sequence.
+  - ``barrier_isync_fence_full()`` (ISB) now follows every ``__set_SCTLR()``
+    call that changes the MMU-enable bit, as required by the ARM Architecture
+    Reference Manual.  This covers the initial MMU enable in ``z_arm_mmu_init``
+    and both the disable and re-enable in
+    ``arm_mmu_remap_l1_section_to_l2_table``.
+  - Duplicate ``ICACHE_ENABLE_BIT``/``DCACHE_ENABLE_BIT`` lines removed from
+    both branches of the ``CONFIG_ARMV6_ARM1176`` ``#ifdef``; they now appear
+    once after the conditional together with ``MMU_ENABLE_BIT``.
+
+- ``cortex_a_r/cache.c`` ARM1176-specific whole-cache operations: all functions
+  that previously called CMSIS ``L1C_InvalidateDCacheAll()``,
+  ``L1C_CleanDCacheAll()``, or ``L1C_CleanInvalidateDCacheAll()`` — which loop
+  over cache sets/ways by reading the ARMv7-only CLIDR register — are now
+  replaced under ``CONFIG_ARMV6_ARM1176`` with direct MCR instructions per the
+  ARM1176JZF-S TRM:
+
+  - ``arch_dcache_invd_all()`` → ``MCR p15, 0, r0, c7, c6, 0`` (TRM B2.7.4)
+  - ``arch_dcache_flush_all()`` → ``MCR p15, 0, r0, c7, c10, 0`` (TRM B2.7.6)
+  - ``arch_dcache_flush_and_invd_all()`` → ``MCR p15, 0, r0, c7, c14, 0``
+    (TRM B2.7.7)
+  - ``arch_icache_invd_all()`` → ``MCR p15, 0, r0, c7, c5, 0`` (TRM B2.7.5)
+  - ``arch_dcache_enable()``, ``arch_dcache_disable()``, and
+    ``arch_icache_enable()`` now call the above helpers instead of the CMSIS
+    ``L1C_*`` functions.  ``L1C_InvalidateICacheAll()`` was also unsafe because
+    it calls ``__DSB()``/``__ISB()`` internally, emitting the ARMv7-only
+    mnemonics.
 
 Important Behavioral Changes
 ****************************
@@ -151,6 +208,23 @@ Key facts confirmed from those sources:
 - BCM2835 system timer is suitable for a first periodic kernel tick source.
 - ARM1176 reset starts from low vectors unless high vectors are enabled.
 - ARM1176 exception vectors can be relocated with VBAR.
+- BCM2835 D-cache is 16 KB, 4-way set-associative, 16-byte cache lines, 256
+  sets (confirmed from ``references/linux-rpi/arch/arm/boot/dts/broadcom/bcm2835.dtsi``).
+- BCM2835 has no L2 cache available to the CPU; the L2 is dedicated to the GPU
+  (same DTS source).  No L2 cache maintenance is needed.
+- ARM1176 MMU init sequence derived from
+  ``references/linux-rpi/arch/arm/mm/proc-v6.S`` (``__v6_setup`` function),
+  extracted from the blobless partial clone using ``git show HEAD:<path>``:
+
+  - cache clean+invalidate before MMU enable: ``c7, c14, 0`` (D), ``c7, c5, 0`` (I)
+  - write-buffer drain after cache ops: ``c7, c10, 4``
+  - TLB invalidation: ``c8, c7, 0`` (I+D TLBs)
+  - TTBR0 flags for UP (uniprocessor): outer WB+WA region (``TTB_RGN_WBWA``)
+  - SCTLR ``v6_crval``: XP (bit 23), Z (branch prediction, bit 11),
+    U (unaligned, bit 22) all set by Linux in addition to M/C/I
+  - ISB required after every SCTLR write that changes translation state
+  - ARM1176 barrier encodings (ISB/DSB/DMB) from the same file and from the
+    ARM1176JZF-S TRM chapters B2.7.1–B2.7.3
 
 Temporary Scaffolding And Stubs
 *******************************
@@ -525,6 +599,61 @@ Observed result on real Raspberry Pi Zero W hardware for
 - this sample has also now been re-validated on real hardware with the new
   minimal ARM1176 MMU support enabled
 
+The current verified ``mem_map`` build command is:
+
+.. code-block:: sh
+
+   west build -b rpi_zero_w zephyr/tests/kernel/mem_protect/mem_map \
+     -d ./zephyr/build --pristine
+
+The current verified ``mem_map`` QEMU boot command is:
+
+.. code-block:: sh
+
+   qemu-system-arm -M raspi0 -display none -monitor none \
+     -serial null -serial stdio \
+     -kernel ./zephyr/build/zephyr/zephyr.elf
+
+Observed result under QEMU ``raspi0`` for ``mem_map`` (``mem_map`` suite):
+
+- ``test_k_mem_map_phys_bare_exec``: **FAIL** — QEMU ``raspi0`` does not model
+  the XN (Execute Never) MMU bit; no PREFETCH ABORT is generated when jumping
+  into an XN-mapped page, so the test's expected-fault path is never reached
+- ``test_k_mem_map_phys_bare_rw``: PASS — DATA ABORT on write to an RO mapping
+- ``test_k_mem_map_phys_bare_side_effect``: PASS — no unintended alias side-effects
+- ``test_k_mem_map_phys_bare_unmap_reclaim_addr``: PASS — VA region correctly
+  reclaimed and reused after ``arch_mem_unmap()``
+- ``test_k_mem_unmap_phys_bare``: PASS — DATA ABORT on access to a page after unmap
+- Overall: ``TESTSUITE mem_map failed`` (one QEMU-only XN limitation)
+
+Observed result on real Raspberry Pi Zero W hardware for ``mem_map``
+(``mem_map`` suite):
+
+- ``test_k_mem_map_phys_bare_exec``: PASS — hardware correctly generates a
+  PREFETCH ABORT at ``pc: 0x00805000`` when jumping into a page mapped without
+  execute permission, confirming the ARM1176 MMU XN bit is enforced
+- ``test_k_mem_map_phys_bare_rw``: PASS
+- ``test_k_mem_map_phys_bare_side_effect``: PASS
+- ``test_k_mem_map_phys_bare_unmap_reclaim_addr``: PASS — both mapped addresses
+  returned as ``0x7fd4d6``, confirming VA reclaim
+- ``test_k_mem_unmap_phys_bare``: PASS
+- Overall: ``TESTSUITE mem_map succeeded``
+
+This result validates the complete ``arch_mem_map()`` / ``arch_mem_unmap()``
+runtime path on real ARM1176 silicon.  The fault type ``Unknown (15)`` in the
+permission-fault cases and ``Unknown (7)`` in the translation-fault cases reflect
+that the current Zephyr DFSR decoder does not yet name ARMv6 short-descriptor
+fault status codes; the underlying MMU behavior is correct.
+
+Note on ``mem_map_api`` suite: the ``test_k_mem_map_exhaustion`` test allocates
+all available virtual pages in a loop (~16 000 iterations at 4 KB/page for
+the ~63 MB free address space on this board) and runs for several minutes.
+``test_k_mem_map_user`` auto-skips because ``CONFIG_USERSPACE`` is not enabled.
+The remaining tests (``test_k_mem_map_unmap``, ``test_k_mem_map_guard_before``,
+``test_k_mem_map_guard_after``) exercise ``k_mem_map()`` / ``k_mem_unmap()`` and
+guard-page fault enforcement but were not observed completing due to the
+exhaustion test's runtime.
+
 The current verified root cause for the D-cache failure after MMU enable is:
 
 - enabling D-cache with ``ARM_MMU_SCTLR_DCACHE_ENABLE_BIT`` caused an
@@ -542,11 +671,26 @@ The current verified root cause for the D-cache failure after MMU enable is:
   confirmed the halt location was ``arch_system_halt``, not a corrupted
   ``uart_isr``
 - the fix is in ``arch/arm/core/mmu/arm_mmu.c`` under
-  ``#ifdef CONFIG_ARMV6_ARM1176``: replace ``L1C_InvalidateDCacheAll()`` with
-  an inline ``MCR p15, 0, r0, c7, c6, 0`` (ARM1176 TRM section 3.2.22,
-  "Invalidate Entire Data Cache")
-- ``L1C_InvalidateICacheAll()`` is unaffected because it uses
-  ``MCR p15, 0, r0, c7, c5, 0`` which is valid on ARM1176
+  ``#ifdef CONFIG_ARMV6_ARM1176``: replace all CMSIS cache helper calls with
+  direct MCR instructions valid on ARM1176:
+
+  - ``MCR p15, 0, r0, c7, c5, 0`` — invalidate entire I-cache (TRM B2.7.5)
+  - ``MCR p15, 0, r0, c7, c14, 0`` — clean+invalidate entire D-cache (TRM
+    B2.7.7); clean+invalidate rather than invalidate-only so that dirty lines
+    are written back on warm resets
+  - ``MCR p15, 0, r0, c7, c10, 4`` — drain write buffer / DSB (TRM B2.7.2)
+
+- ``L1C_InvalidateICacheAll()`` is also not safe to call on ARM1176 because it
+  calls CMSIS ``__DSB()`` and ``__ISB()`` internally; those expand to
+  ``dsb 0xF`` / ``isb 0xF`` which are ARMv7-only mnemonics rejected by the
+  assembler with ``-mcpu=arm1176jzf-s``
+- the broader barrier problem (``dsb``/``isb``/``dmb`` mnemonics not valid on
+  ARM1176) was fixed by overriding ``z_barrier_dsync_fence_full()``,
+  ``z_barrier_isync_fence_full()``, and ``z_barrier_dmem_fence_full()`` in
+  ``include/zephyr/arch/arm/barrier.h`` with inline MCR equivalents under
+  ``CONFIG_ARMV6_ARM1176``; the CMSIS ``cmsis_gcc.h`` file is not modified
+- ``cortex_a_r/cpu_idle.c`` was also using ``__DSB()``/``__ISB()`` directly and
+  was updated to use ``barrier_dsync_fence_full()``/``barrier_isync_fence_full()``
 
 SD Card Boot Guide
 ******************
@@ -746,19 +890,16 @@ Open Risks
 - The new ``-mno-unaligned-access`` workaround fixes the observed failures, but
   it is still a workaround on top of the temporary shared ``cortex_a_r`` path
   rather than a dedicated ARM11 architecture solution.
-- Minimal ARM1176 MMU support now boots ``samples/hello_world`` under QEMU
-  ``raspi0``, but this is still an early bring-up state:
-
-  - the exception vector page had to be mapped explicitly because it lives in
-    ``rom_start`` before ``__text_region_start`` in the current linker layout
-  - the current ARM1176 MMU path has been validated so far with
-    ``samples/hello_world`` and ``samples/drivers/uart/echo_bot`` under QEMU,
-    and with ``samples/hello_world``, ``samples/drivers/uart/echo_bot``, and
-    ``samples/kernel/msg_queue`` on real hardware
-  - the current MMU path is also now observed working on real hardware with
-    both I-cache and D-cache enabled for those same sample classes
-  - the atomic backend is still intentionally conservative and should only be
-    revisited after broader MMU validation
+- The ARM1176 MMU bring-up milestone is complete for bare-metal kernel-space use.
+  ``arch_mem_map()`` / ``arch_mem_unmap()`` are hardware-validated via
+  ``tests/kernel/mem_protect/mem_map``, including XN (Execute Never) enforcement.
+  The atomic backend remains intentionally conservative
+  (``CONFIG_ATOMIC_OPERATIONS_C``) and can be revisited after the
+  ``cortex_a_r`` shared-path risk is resolved.
+- ``CONFIG_USERSPACE`` is the next major MMU topic: it requires implementing
+  ``arch_mem_domain_*``, USR mode entry/exit, and SVC syscall dispatch.  None
+  of these exist yet for the ARM1176 path.  Userspace is deferred as a
+  separate project.
 - The current board no longer depends on firmware UART pin muxing for the
   mini-UART console path, but BCM2835 pinctrl coverage is still far from
   complete.
@@ -771,39 +912,45 @@ Recommended Next Steps
 
 Work in this order unless new hardware results force a change:
 
-1. Validate the new minimal ARM1176 MMU path beyond ``hello_world``:
+1. Complete ``tests/kernel/mem_protect/mem_map_api`` validation on hardware:
 
-   - repeat the already working sample set under QEMU first
-   - continue confirming the same MMU-enabled path on real Pi Zero W hardware
-   - keep watching exception entry/return closely because the first MMU bug was
-     exposed by the vector page not being mapped
+   - ``test_k_mem_map_exhaustion`` runs for several minutes (16 000+ page
+     allocations); let it finish or add a board overlay to skip it
+   - ``test_k_mem_map_unmap``, ``test_k_mem_map_guard_before``, and
+     ``test_k_mem_map_guard_after`` should pass once exhaustion completes;
+     they test ``k_mem_map()`` / ``k_mem_unmap()`` and guard-page fault
+     enforcement via the higher-level kernel API
 
 2. Continue reducing ARM1176-specific assumptions inside the shared
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
-   behavior.
-3. Expand real-hardware validation beyond the already working timer tick,
+   behavior.  The shared path is still the largest architectural risk.
+
+3. Revisit the atomic backend: now that the MMU path is stable, evaluate
+   whether ``CONFIG_ATOMIC_OPERATIONS_C`` can be replaced with real
+   ``LDREX``/``STREX`` exclusive accesses under the MMU.
+
+4. Expand real-hardware validation beyond the already working timer tick,
    mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
-4. Keep testing the current bring-up chain on hardware and under QEMU:
 
-   - reset
-   - vectors
-   - periodic timer tick
-   - mini-UART console
-   - mini-UART RX echo path
-   - GPIO interrupt delivery
+5. Decide whether to continue with incremental ARM1176 support inside the
+   shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under
+   ``arch/arm``.  The current scaffolding is a known temporary shortcut.
 
-5. After the MMU path is stable on both QEMU and hardware, revisit whether the
-   board can safely move back to builtin atomic operations.
-6. After stable tick/IRQ behavior, decide whether to:
-
-   - continue with incremental ARM1176 support inside the shared path, or
-   - split out a dedicated ARM11 path under ``arch/arm``
-
-7. Once core ARM1176 execution and interrupt behavior are less risky,
+6. Once core ARM1176 execution and interrupt behavior are less risky,
    follow-up work can expand into:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - broader BCM2835 GPIO coverage beyond the current minimal banks
    - PL011 selection options
-   - less minimal timer behavior
+   - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
+
+7. ``CONFIG_USERSPACE`` is a separate, large project.  Prerequisites before
+   starting:
+
+   - stable ARM1176 execution path (ideally a dedicated arch path, not
+     shared ``cortex_a_r``)
+   - implement ``arch_mem_domain_init()`` and related ``arch_mem_domain_*``
+     functions for MMU-based per-thread address space management
+   - implement USR mode entry/exit and SVC syscall dispatch
+   - implement ASID management to avoid full TLB flushes on context switch

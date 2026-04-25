@@ -21,6 +21,31 @@ static ALWAYS_INLINE void z_barrier_sync_synchronize(void)
 	__sync_synchronize();
 }
 
+#if defined(CONFIG_ARMV6_ARM1176)
+/*
+ * ARM1176 (ARMv6) does not support the ISB/DSB/DMB mnemonics introduced in
+ * ARMv7.  Use the equivalent ARMv6 MCR coprocessor instructions directly so
+ * that the third-party CMSIS header (cmsis_gcc.h) does not need to be
+ * modified.
+ *   ISB: MCR p15, 0, r0, c7, c5, 4  (ARM1176 TRM B2.7.3 "Prefetch Flush")
+ *   DSB: MCR p15, 0, r0, c7, c10, 4 (ARM1176 TRM B2.7.2 "Drain Write Buffer")
+ *   DMB: MCR p15, 0, r0, c7, c10, 5 (ARM1176 TRM B2.7.1 "Data Memory Barrier")
+ */
+static ALWAYS_INLINE void z_barrier_dmem_fence_full(void)
+{
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 5" : : "r"(0) : "memory");
+}
+
+static ALWAYS_INLINE void z_barrier_dsync_fence_full(void)
+{
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
+}
+
+static ALWAYS_INLINE void z_barrier_isync_fence_full(void)
+{
+	__asm__ volatile("mcr p15, 0, %0, c7, c5, 4" : : "r"(0) : "memory");
+}
+#else
 static ALWAYS_INLINE void z_barrier_dmem_fence_full(void)
 {
 	__DMB();
@@ -35,6 +60,7 @@ static ALWAYS_INLINE void z_barrier_isync_fence_full(void)
 {
 	__ISB();
 }
+#endif /* CONFIG_ARMV6_ARM1176 */
 
 #ifdef __cplusplus
 }
