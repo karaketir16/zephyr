@@ -8,7 +8,10 @@ initial GPIO and logging:
 ``samples/hello_world``, ``samples/drivers/uart/echo_bot``,
 ``samples/basic/blinky``, ``samples/basic/button``,
 ``samples/basic/sys_heap``, ``samples/basic/threads``,
-``samples/basic/hash_map``, and ``samples/subsys/logging/logger``.
+``samples/basic/hash_map``, ``samples/subsys/logging/logger``,
+``samples/kernel/msg_queue``,
+``samples/kernel/condition_variables/simple``, and
+``samples/kernel/condition_variables/condvar``.
 
 Current State
 *************
@@ -16,13 +19,15 @@ Current State
 - ``rpi_zero_w/bcm2835`` now builds successfully and produces ``zephyr.elf``.
 - ``samples/hello_world`` has now been observed on real Raspberry Pi Zero W
   hardware over the mini-UART console.
-- ``samples/drivers/uart/echo_bot`` now works under QEMU ``raspi0`` with RX
-  and TX over the BCM2835 AUX mini-UART path.
+- ``samples/drivers/uart/echo_bot`` now works under QEMU ``raspi0`` and on
+  real Raspberry Pi Zero W hardware with RX and TX over the BCM2835 AUX
+  mini-UART path.
 - ``samples/basic/blinky`` now works on real Raspberry Pi Zero W hardware using
   the on-board ACT LED.
 - ``samples/basic/button`` now works on real Raspberry Pi Zero W hardware with
   a temporary external button wired from GPIO17 to GND through a sample-specific
-  overlay.
+  overlay, and the same path has now also been validated with GPIO interrupts
+  on real hardware.
 - ``samples/basic/sys_heap`` now runs under QEMU ``raspi0`` and the previously
   suspicious large heap free-count was confirmed to be a sample-side reporting
   artifact, not a BCM2835 port bug.
@@ -35,6 +40,15 @@ Current State
 - ``samples/subsys/logging/logger`` now works under QEMU ``raspi0`` and on
   real Raspberry Pi Zero W hardware after fixing the ARM1176 bring-up issues
   that had made logger output look broken.
+- ``samples/kernel/msg_queue`` now works on real Raspberry Pi Zero W hardware.
+  The observed ``CBA012345`` receive order matches the sample's expected
+  urgent-before-normal message queue behavior.
+- ``samples/kernel/condition_variables/simple`` now works on real Raspberry Pi
+  Zero W hardware. The main thread wakes repeatedly on the condition variable
+  until ``done == 20``, matching the sample's expected behavior.
+- ``samples/kernel/condition_variables/condvar`` now works on real Raspberry Pi
+  Zero W hardware. The waiter wakes at the configured threshold and the sample
+  ends with the expected final count of ``145``.
 - This is now beyond compile-only and QEMU-only bring-up, but it is still not
   a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
@@ -65,7 +79,8 @@ The following pieces now exist in-tree:
 - BCM2835 mini-UART reuse through the existing Broadcom AUX mini-UART driver.
 - ``rpi_zero_w`` ``led0`` wiring for the real ACT LED on GPIO47.
 - ``samples/basic/button/boards/rpi_zero_w.overlay`` for a temporary external
-  GPIO17 button using the input ``gpio-keys`` path in polling mode.
+  GPIO17 button using the input ``gpio-keys`` path, now also validated in
+  interrupt-driven mode on hardware.
 - ``samples/basic/threads/boards/rpi_zero_w.overlay`` for a temporary external
   ``led1`` on GPIO27 so the basic threading sample can run without changing the
   base board description.
@@ -161,8 +176,6 @@ finished port:
   driver aimed at minimal bring-up.
 - ``drivers/timer/bcm2835_system_timer.c`` is a first-pass periodic timer
   driver. Timeout reprogramming and richer timer behavior are not implemented.
-- ``samples/basic/button`` currently uses polling mode for the external button,
-  so it does not validate BCM2835 GPIO interrupt delivery yet.
 - ``rpi_zero_w`` should still be treated as experimental until timer IRQ
   delivery and broader hardware behavior are validated beyond first console
   output.
@@ -200,6 +213,17 @@ Observed result under QEMU ``raspi0``:
 - ``samples/hello_world`` reaches ``main()``
 - QEMU prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
 
+Observed result on real Raspberry Pi Zero W hardware for
+``samples/hello_world``:
+
+- the mini-UART console prints the Zephyr banner and
+  ``Hello World! rpi_zero_w/bcm2835``
+- this sample has also now been re-validated on real hardware with the new
+  minimal ARM1176 MMU support enabled
+- this same MMU path has now also been observed working on real hardware after
+  enabling I-cache and D-cache simultaneously; the D-cache path required fixing
+  ``L1C_InvalidateDCacheAll()`` (see D-cache root cause note below)
+
 The current verified ``echo_bot`` build command is:
 
 .. code-block:: sh
@@ -223,6 +247,18 @@ Observed result under QEMU ``raspi0`` for ``echo_bot``:
 - AUX mini-UART RX IRQ delivery now reaches both ``uart_isr`` and
   ``serial_cb``
 - entering a line such as ``hello`` prints ``Echo: hello``
+
+Observed result on real Raspberry Pi Zero W hardware for ``echo_bot``:
+
+- the serial console prints the Zephyr banner and the ``echo_bot`` prompt
+- AUX mini-UART RX and TX both work on the Pi Zero W mini-UART console path
+- entering a line such as ``hello`` prints ``Echo: hello``
+- this confirms the mini-UART RX interrupt-driven echo path is now validated
+  on real hardware, not only under QEMU
+- this path has also now been re-validated on real hardware with the new
+  minimal ARM1176 MMU support enabled
+- this same MMU path has now also been observed working on real hardware after
+  enabling I-cache
 
 The current verified GDB-assisted root cause for the earlier failed
 ``echo_bot`` RX path is:
@@ -293,7 +329,12 @@ Observed result on real Raspberry Pi Zero W hardware for ``button``:
 - press and release events are printed on the console
 - the ACT LED follows button state through the sample's optional ``led0`` path
 - periodic timer activity is therefore now observed on real hardware during the
-  polling-mode button test
+  button test
+- with ``polling-mode`` removed from the sample overlay, the same setup also
+  produces button press and release events through the BCM2835 GPIO interrupt
+  path on real hardware
+- temporary driver-side ``printk`` tracing during that run showed BCM2835 GPIO
+  ISR entry for GPIO17 before the sample callback printed its button events
 
 The current verified ``sys_heap`` build command is:
 
@@ -427,6 +468,85 @@ The current verified root cause for the earlier logging failure is:
 - a later real-hardware fault investigation also showed that ARM1176 no-MMU
   bring-up must not rely on builtin exclusive-access atomics, so ARM1176 now
   selects ``CONFIG_ATOMIC_OPERATIONS_C`` unless MMU support is enabled
+
+The current verified ``msg_queue`` build command is:
+
+.. code-block:: sh
+
+   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
+     zephyr/samples/kernel/msg_queue \
+     -d ./zephyr/build -p always
+
+Observed result on real Raspberry Pi Zero W hardware for ``msg_queue``:
+
+- the mini-UART console prints the producer trace for normal and urgent items
+- the consumer prints ``CBA012345``
+- this matches the expected urgent-before-normal ordering and confirms working
+  message queue behavior on target
+- this sample has also now been re-validated on real hardware with the new
+  minimal ARM1176 MMU support enabled
+- this same MMU path has now also been observed working on real hardware after
+  enabling I-cache
+
+The current verified ``condition_variables/simple`` build command is:
+
+.. code-block:: sh
+
+   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
+     zephyr/samples/kernel/condition_variables/simple \
+     -d ./zephyr/build -p always
+
+Observed result on real Raspberry Pi Zero W hardware for
+``condition_variables/simple``:
+
+- the mini-UART console prints worker progress for threads 0 through 19
+- the main thread wakes repeatedly after each condition-variable signal
+- the sample ends with ``done == 20 so everyone is done``
+- this confirms working condition-variable wait/signal behavior on target
+- this sample has also now been re-validated on real hardware with the new
+  minimal ARM1176 MMU support enabled
+
+The current verified ``condition_variables/condvar`` build command is:
+
+.. code-block:: sh
+
+   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
+     zephyr/samples/kernel/condition_variables/condvar \
+     -d ./zephyr/build -p always
+
+Observed result on real Raspberry Pi Zero W hardware for
+``condition_variables/condvar``:
+
+- the waiter thread blocks until the threshold signal is sent at count 12
+- the waiter resumes, updates the shared count, and unlocks the mutex cleanly
+- the sample ends with ``Final value of count = 145. Done.``
+- this confirms working condition-variable signal, wake, and mutex interaction
+  on target
+- this sample has also now been re-validated on real hardware with the new
+  minimal ARM1176 MMU support enabled
+
+The current verified root cause for the D-cache failure after MMU enable is:
+
+- enabling D-cache with ``ARM_MMU_SCTLR_DCACHE_ENABLE_BIT`` caused an
+  immediate Undefined Instruction exception inside ``z_arm_mmu_init``
+- the faulting instruction was ``MRC p15, 1, r0, c0, c0, 1``
+  (the CLIDR / Cache Level ID Register read used by the CMSIS
+  ``L1C_InvalidateDCacheAll()`` function)
+- CLIDR is an ARMv7-only register; it does not exist on ARM1176 (ARMv6);
+  executing this coprocessor access on ARM1176 triggers an Undefined Instruction
+  exception which propagates through ``z_fatal_error`` to ``arch_system_halt``
+- the exception mode at the time of the fault was System mode (``SPSR_und = 0x1DF``)
+  with the CPU halted in UND mode at ``arch_system_halt+0xC`` (``b .``)
+- the symptom was that ``hello_world`` appeared to halt immediately because
+  the GDB session still held echo_bot symbols; ``info address arch_system_halt``
+  confirmed the halt location was ``arch_system_halt``, not a corrupted
+  ``uart_isr``
+- the fix is in ``arch/arm/core/mmu/arm_mmu.c`` under
+  ``#ifdef CONFIG_ARMV6_ARM1176``: replace ``L1C_InvalidateDCacheAll()`` with
+  an inline ``MCR p15, 0, r0, c7, c6, 0`` (ARM1176 TRM section 3.2.22,
+  "Invalidate Entire Data Cache")
+- ``L1C_InvalidateICacheAll()`` is unaffected because it uses
+  ``MCR p15, 0, r0, c7, c5, 0`` which is valid on ARM1176
 
 SD Card Boot Guide
 ******************
@@ -563,7 +683,6 @@ Exact repeatable SEGGER GDB server command:
      -if JTAG \
      -speed 1000 \
      -port 2331 \
-     -singlerun \
      -noir \
      -strict \
      -select USB=69650079
@@ -609,11 +728,9 @@ Observed result with the sequence above:
 What Is Not Verified Yet
 ************************
 
-- BCM2835 GPIO interrupt delivery on hardware
-- ARMCTRL interrupt handling on hardware beyond the minimal timer/UART/GPIO
-  polling path
+- ARMCTRL interrupt handling on hardware beyond the currently validated
+  timer, mini-UART RX, and BCM2835 GPIO button-interrupt cases
 - Exception entry and return behavior on hardware
-- ``echo_bot`` RX/TX behavior on real Raspberry Pi Zero W hardware
 
 Open Risks
 **********
@@ -629,9 +746,19 @@ Open Risks
 - The new ``-mno-unaligned-access`` workaround fixes the observed failures, but
   it is still a workaround on top of the temporary shared ``cortex_a_r`` path
   rather than a dedicated ARM11 architecture solution.
-- ARM1176 still has no MMU support in this bring-up, so the current atomic
-  backend choice is intentionally conservative and should be revisited once
-  minimal ARM11 MMU support exists.
+- Minimal ARM1176 MMU support now boots ``samples/hello_world`` under QEMU
+  ``raspi0``, but this is still an early bring-up state:
+
+  - the exception vector page had to be mapped explicitly because it lives in
+    ``rom_start`` before ``__text_region_start`` in the current linker layout
+  - the current ARM1176 MMU path has been validated so far with
+    ``samples/hello_world`` and ``samples/drivers/uart/echo_bot`` under QEMU,
+    and with ``samples/hello_world``, ``samples/drivers/uart/echo_bot``, and
+    ``samples/kernel/msg_queue`` on real hardware
+  - the current MMU path is also now observed working on real hardware with
+    both I-cache and D-cache enabled for those same sample classes
+  - the atomic backend is still intentionally conservative and should only be
+    revisited after broader MMU validation
 - The current board no longer depends on firmware UART pin muxing for the
   mini-UART console path, but BCM2835 pinctrl coverage is still far from
   complete.
@@ -644,31 +771,39 @@ Recommended Next Steps
 
 Work in this order unless new hardware results force a change:
 
-1. Continue reducing ARM1176-specific assumptions inside the shared
+1. Validate the new minimal ARM1176 MMU path beyond ``hello_world``:
+
+   - repeat the already working sample set under QEMU first
+   - continue confirming the same MMU-enabled path on real Pi Zero W hardware
+   - keep watching exception entry/return closely because the first MMU bug was
+     exposed by the vector page not being mapped
+
+2. Continue reducing ARM1176-specific assumptions inside the shared
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.
-2. Validate the now-working timer IRQ and mini-UART RX interrupt path on real
-   Raspberry Pi Zero W hardware, not only under QEMU.
-3. After first hardware console success, keep testing the minimal chain:
+3. Expand real-hardware validation beyond the already working timer tick,
+   mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
+4. Keep testing the current bring-up chain on hardware and under QEMU:
 
    - reset
    - vectors
    - periodic timer tick
    - mini-UART console
    - mini-UART RX echo path
+   - GPIO interrupt delivery
 
-4. Add minimal ARM1176 MMU support so RAM can be marked as Normal memory and
-   the board can eventually move back to builtin atomic operations safely.
-5. After stable tick/IRQ behavior, decide whether to:
+5. After the MMU path is stable on both QEMU and hardware, revisit whether the
+   board can safely move back to builtin atomic operations.
+6. After stable tick/IRQ behavior, decide whether to:
 
    - continue with incremental ARM1176 support inside the shared path, or
    - split out a dedicated ARM11 path under ``arch/arm``
 
-6. With first hardware boot now achieved, follow-up work can expand into:
+7. Once core ARM1176 execution and interrupt behavior are less risky,
+   follow-up work can expand into:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - broader BCM2835 GPIO coverage beyond the current minimal banks
-   - GPIO interrupt validation
    - PL011 selection options
    - less minimal timer behavior
    - general board refinement

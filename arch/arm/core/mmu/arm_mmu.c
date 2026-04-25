@@ -66,6 +66,22 @@ static uint32_t arm_mmu_l2_next_free_table;
  */
 static const struct arm_mmu_flat_range mmu_zephyr_ranges[] = {
 	/*
+	 * Cortex-A/R keeps the exception vector table in the rom_start area,
+	 * which sits before __text_region_start in this linker layout.
+	 * Map it explicitly so abort/IRQ entry remains executable with MMU on.
+	 */
+	{ .name  = "zephyr_vectors",
+	  .start = (uint32_t)_vector_start,
+	  .end   = (uint32_t)_vector_end,
+	  .attrs = MT_NORMAL | MATTR_SHARED |
+#if defined(CONFIG_GDBSTUB)
+		   MPERM_R | MPERM_X | MPERM_W |
+#else
+		   MPERM_R | MPERM_X |
+#endif
+		   MATTR_CACHE_OUTER_WB_nWA | MATTR_CACHE_INNER_WB_nWA},
+
+	/*
 	 * Mark the zephyr execution regions (data, bss, noinit, etc.)
 	 * cacheable, read / write and non-executable
 	 */
@@ -815,9 +831,17 @@ int z_arm_mmu_init(void)
 	reg_val = ((uint32_t)&l1_page_table.entries[0] & ~0x3FFF);
 
 	/*
-	 * Set IRGN, RGN, S in TTBR0 based on the configuration of the
-	 * memory area the actual page tables are located in.
+	 * Configure TTBR0 cacheability bits based on the attributes of the
+	 * memory area the page tables reside in.
 	 */
+#ifdef CONFIG_ARMV6_ARM1176
+	if (pt_attrs &
+	    (MATTR_CACHE_OUTER_WB_WA | MATTR_CACHE_OUTER_WT_nWA |
+	     MATTR_CACHE_OUTER_WB_nWA | MATTR_CACHE_INNER_WB_WA |
+	     MATTR_CACHE_INNER_WT_nWA | MATTR_CACHE_INNER_WB_nWA)) {
+		reg_val |= ARM_MMU_TTBR_CACHEABLE_BIT_NON_MP_ONLY;
+	}
+#else
 	if (pt_attrs & MATTR_SHARED) {
 		reg_val |= ARM_MMU_TTBR_SHAREABLE_BIT;
 	}
@@ -841,6 +865,7 @@ int z_arm_mmu_init(void)
 		reg_val |= ARM_MMU_TTBR_IRGN0_BIT_MP_EXT_ONLY;
 		reg_val |= ARM_MMU_TTBR_IRGN1_BIT_MP_EXT_ONLY;
 	}
+#endif
 
 	__set_TTBR0(reg_val);
 
@@ -852,9 +877,23 @@ int z_arm_mmu_init(void)
 
 	/* Enable the MMU and Cache in SCTLR */
 	reg_val  = __get_SCTLR();
+#ifdef CONFIG_ARMV6_ARM1176
+	L1C_InvalidateICacheAll();
+	/*
+	 * CMSIS L1C_InvalidateDCacheAll() reads the CLIDR register
+	 * (MRC p15, 1, r0, c0, c0, 1) which is ARMv7-only and causes
+	 * an Undefined Instruction exception on ARM1176 (ARMv6).
+	 * Use the ARM1176 TRM c7.c6.0 whole-cache invalidation instead.
+	 */
+	__asm__ volatile("mcr p15, 0, %0, c7, c6, 0" : : "r"(0) : "memory");
+	reg_val |= ARM_MMU_SCTLR_XP_BIT;
+	reg_val |= ARM_MMU_SCTLR_ICACHE_ENABLE_BIT;
+	reg_val |= ARM_MMU_SCTLR_DCACHE_ENABLE_BIT;
+#else
 	reg_val |= ARM_MMU_SCTLR_AFE_BIT;
 	reg_val |= ARM_MMU_SCTLR_ICACHE_ENABLE_BIT;
 	reg_val |= ARM_MMU_SCTLR_DCACHE_ENABLE_BIT;
+#endif
 	reg_val |= ARM_MMU_SCTLR_MMU_ENABLE_BIT;
 	__set_SCTLR(reg_val);
 

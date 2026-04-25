@@ -19,7 +19,7 @@ config ARM_AARCH32_MMU
 choice ARM_AARCH32_MMU_TYPE
 	prompt "MMU Type"
 	default ARM_AARCH32_MMU_VMSA_V5 if CPU_AARCH32_ARM9
-	default ARM_AARCH32_MMU_NONE if ARMV6_ARM1176
+	default ARM_AARCH32_MMU_VMSA_V6 if ARMV6_ARM1176
 	default ARM_AARCH32_MMU_VMSA_V7 if CPU_AARCH32_CORTEX_A && !ARMV6_ARM1176
 
 config ARM_AARCH32_MMU_NONE
@@ -34,6 +34,13 @@ config ARM_AARCH32_MMU_VMSA_V5
 	select ARM_AARCH32_MMU
 	help
 	  The current CPU has an ARMv5 Memory Management Unit.
+
+config ARM_AARCH32_MMU_VMSA_V6
+	bool "ARMv6 MMU Support"
+	select ARM_AARCH32_MMU
+	help
+	  The current CPU has an ARMv6 short-descriptor MMU, such as the
+	  ARM1176JZF-S.
 
 config ARM_AARCH32_MMU_VMSA_V7
 	bool "ARMv7 Cortex-A MMU Support"
