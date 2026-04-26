@@ -55,6 +55,11 @@ Current State
   This validates the full ``arch_mem_map()`` / ``arch_mem_unmap()`` runtime path
   end-to-end on hardware.  QEMU ``raspi0`` does not model the XN bit so the exec
   test fails there; the remaining four tests pass under QEMU.
+- ``tests/kernel/mem_protect/mem_map_api`` (``mem_map_api`` suite, 5 tests)
+  now also passes on real Raspberry Pi Zero W hardware and under QEMU
+  ``raspi0``. ``test_k_mem_map_exhaustion`` completes, the guard-page tests
+  fault as expected, and ``test_k_mem_map_user`` still auto-skips because
+  ``CONFIG_USERSPACE`` is not enabled.
 - The ARM1176 MMU bring-up milestone is now complete for bare-metal kernel-space
   use.  ``CONFIG_USERSPACE`` and per-thread address-space management are the next
   major MMU topic but are deferred as a separate project.
@@ -257,440 +262,104 @@ finished port:
 What Has Been Verified
 **********************
 
-The current verified build command is:
+Use the following commands as the default verification pattern:
 
 .. code-block:: sh
 
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w zephyr/samples/hello_world \
-     -d /tmp/zephyr-rpi-zero-w-build -p always
-
-Result:
-
-- configuration succeeds
-- compilation succeeds
-- linking succeeds
-- ``zephyr/zephyr.elf`` is produced for ``rpi_zero_w/bcm2835``
-
-The current verified QEMU boot command is:
+   env CCACHE_DISABLE=1 west build -b rpi_zero_w <app-or-test> \
+     -d <build-dir> -p always
 
 .. code-block:: sh
 
    qemu-system-arm -M raspi0 -display none -monitor none \
      -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0``:
-
-- reset reaches ``z_arm_reset``
-- early arch setup reaches ``z_cstart``
-- console init reaches ``uart_console_init``
-- ``samples/hello_world`` reaches ``main()``
-- QEMU prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
-
-Observed result on real Raspberry Pi Zero W hardware for
-``samples/hello_world``:
-
-- the mini-UART console prints the Zephyr banner and
-  ``Hello World! rpi_zero_w/bcm2835``
-- this sample has also now been re-validated on real hardware with the new
-  minimal ARM1176 MMU support enabled
-- this same MMU path has now also been observed working on real hardware after
-  enabling I-cache and D-cache simultaneously; the D-cache path required fixing
-  ``L1C_InvalidateDCacheAll()`` (see D-cache root cause note below)
-
-The current verified ``echo_bot`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/drivers/uart/echo_bot \
-     -d /tmp/zephyr-rpi-zero-w-echo-bot-build -p always
-
-The current verified ``echo_bot`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-echo-bot-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``echo_bot``:
-
-- QEMU prints the Zephyr banner and the ``echo_bot`` prompt
-- the BCM2835 system timer IRQ fires and reaches the Zephyr timer path
-- AUX mini-UART RX IRQ delivery now reaches both ``uart_isr`` and
-  ``serial_cb``
-- entering a line such as ``hello`` prints ``Echo: hello``
-
-Observed result on real Raspberry Pi Zero W hardware for ``echo_bot``:
-
-- the serial console prints the Zephyr banner and the ``echo_bot`` prompt
-- AUX mini-UART RX and TX both work on the Pi Zero W mini-UART console path
-- entering a line such as ``hello`` prints ``Echo: hello``
-- this confirms the mini-UART RX interrupt-driven echo path is now validated
-  on real hardware, not only under QEMU
-- this path has also now been re-validated on real hardware with the new
-  minimal ARM1176 MMU support enabled
-- this same MMU path has now also been observed working on real hardware after
-  enabling I-cache
-
-The current verified GDB-assisted root cause for the earlier failed
-``echo_bot`` RX path is:
-
-- the failure was not a QEMU console-slot mismatch once TX output was visible
-- the first real problem was recursive IRQ re-entry in the shared
-  ``cortex_a_r`` IRQ wrapper when used with the BCM2835 custom interrupt
-  controller path
-- that recursion eventually overflowed the exception stack and corrupted
-  RAM-backed text, leading to undefined-instruction faults inside code that was
-  otherwise valid in the ELF image
-- masking IRQs during ISR dispatch for
-  ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER`` fixed the issue in QEMU
-
-Important QEMU console detail:
-
-- In QEMU's BCM2835 model, PL011 ``uart0`` is wired to ``serial_hd(0)``
-  while AUX mini-UART ``uart1`` is wired to ``serial_hd(1)``.
-- Because the current Zephyr board uses ``uart1`` as ``zephyr,console``,
-  a simple ``-serial stdio`` test targets the wrong UART.
-- For the current board, the working QEMU console setup is
-  ``-serial null -serial stdio`` so stdio is attached to QEMU serial slot 1.
-
-The current verified raw-image QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -bios /tmp/zephyr-rpi-zero-w-build/zephyr/zephyr.bin
-
-Observed result under that raw-image path:
-
-- QEMU also prints the Zephyr banner and ``Hello World! rpi_zero_w/bcm2835``
-- ``zephyr.bin`` is therefore confirmed usable as a Pi-style flat kernel image
-
-The current verified real-hardware result is:
-
-- Pi Zero W boots from SD card with the Zephyr raw image
-- serial console at 115200 8N1 prints the Zephyr banner
-- serial console prints ``Hello World! rpi_zero_w/bcm2835``
-
-The current verified ``blinky`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/basic/blinky \
-     -d /tmp/zephyr-rpi-zero-w-blinky-build -p always
-
-Observed result on real Raspberry Pi Zero W hardware for ``blinky``:
-
-- the Pi Zero W ACT LED blinks
-- console output reports LED state changes
-
-The current verified ``button`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/basic/button \
-     -d /tmp/zephyr-rpi-zero-w-button-build -p always
-
-Observed result on real Raspberry Pi Zero W hardware for ``button``:
-
-- the console prints ``Press the button``
-- the external button test works using GPIO17 with a momentary switch to GND
-- press and release events are printed on the console
-- the ACT LED follows button state through the sample's optional ``led0`` path
-- periodic timer activity is therefore now observed on real hardware during the
-  button test
-- with ``polling-mode`` removed from the sample overlay, the same setup also
-  produces button press and release events through the BCM2835 GPIO interrupt
-  path on real hardware
-- temporary driver-side ``printk`` tracing during that run showed BCM2835 GPIO
-  ISR entry for GPIO17 before the sample callback printed its button events
-
-The current verified ``sys_heap`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/basic/sys_heap \
-     -d /tmp/zephyr-rpi-zero-w-sys-heap-build -p always
-
-The current verified ``sys_heap`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-sys-heap-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``sys_heap``:
-
-- QEMU prints the Zephyr banner and the sample banner
-- the sample prints expected allocator activity for the test heap instances
-- the apparently inconsistent large free-count is acceptable for the libc
-  malloc arena on this board because it is backed by the remaining SRAM
-- the printed ``heap size 256`` field for every heap is a sample-side constant,
-  so that part of the output should not be treated as the true heap size for
-  ``z_malloc_heap``
-
-The current verified ``threads`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/basic/threads \
-     -d /tmp/zephyr-rpi-zero-w-threads-build -p always
-
-The current verified ``threads`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-threads-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``threads``:
-
-- QEMU prints the Zephyr banner and repeated ``Toggled ledX`` console output
-- the faster ``led0`` thread and slower ``led1`` thread both run concurrently
-- FIFO handoff plus ``k_malloc()`` and ``k_free()`` activity works during the
-  sample's steady-state loop
-
-Observed result on real Raspberry Pi Zero W hardware for ``threads``:
-
-- the ACT LED and an external LED on GPIO27 both toggle as expected
-- the console prints repeated ``Toggled ledX`` messages on the mini-UART
-- the sample therefore also exercises thread scheduling and FIFO handoff on
-  real hardware
-
-The current verified ``hash_map`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/basic/hash_map \
-     -d /tmp/zephyr-rpi-zero-w-hash-map-build -p always
-
-The current verified ``hash_map`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-hash-map-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``hash_map``:
-
-- the sample now prints its insert/remove/replace statistics
-- the sample ends with ``success``
-- the earlier lack of visible output was downstream of the ARM1176
-  unaligned-access bug, not a missing console or logging backend feature
-
-Observed result on real Raspberry Pi Zero W hardware for ``hash_map``:
-
-- the sample prints its expected hash map statistics on the mini-UART console
-- the sample ends with ``success`` on real hardware as well
-- this confirms the default ``hash_map`` path is now validated beyond QEMU
-
-The current verified ``logger`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/subsys/logging/logger \
-     -d /tmp/zephyr-rpi-zero-w-logger-build -p always
-
-The current verified ``logger`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel /tmp/zephyr-rpi-zero-w-logger-build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``logger``:
-
-- the sample now prints its module, instance, hexdump, severity, and external
-  logger output as expected
-- deferred logging and ``CONFIG_LOG_PRINTK=y`` both work on this board in QEMU
-- the earlier apparent logger stall was actually an alignment fault triggered
-  by the sample's hexdump path on the temporary ARM1176 execution path
-
-Observed result on real Raspberry Pi Zero W hardware for ``logger``:
-
-- the sample now prints its expected logger output on the mini-UART console
-- the sample's module, instance, hexdump, severity, and external logger output
-  are all now observed on target
-- this confirms the logger sample is now validated on real hardware, not only
-  under QEMU
-
-The current verified root cause for the earlier logging failure is:
-
-- the board UART path itself was functioning
-- the first strong reproducer was
-  ``samples/subsys/logging/logger``, which faults in
-  ``sample_instance_call()`` during the hexdump path when unaligned accesses
-  are permitted by the compiler on this target
-- the apparent deferred-logging failure was therefore a secondary symptom of an
-  ARM1176 unaligned-access mismatch, not a separate logging backend defect
-- forcing ``-mno-unaligned-access`` for ``CONFIG_ARMV6_ARM1176`` BCM2835 builds
-  fixed both the logger reproducer and the default ``hash_map`` output path in
-  QEMU
-- a later real-hardware fault investigation also showed that ARM1176 no-MMU
-  bring-up must not rely on builtin exclusive-access atomics, so ARM1176 now
-  selects ``CONFIG_ATOMIC_OPERATIONS_C`` unless MMU support is enabled
-
-The current verified ``msg_queue`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/kernel/msg_queue \
-     -d ./zephyr/build -p always
-
-Observed result on real Raspberry Pi Zero W hardware for ``msg_queue``:
-
-- the mini-UART console prints the producer trace for normal and urgent items
-- the consumer prints ``CBA012345``
-- this matches the expected urgent-before-normal ordering and confirms working
-  message queue behavior on target
-- this sample has also now been re-validated on real hardware with the new
-  minimal ARM1176 MMU support enabled
-- this same MMU path has now also been observed working on real hardware after
-  enabling I-cache
-
-The current verified ``condition_variables/simple`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/kernel/condition_variables/simple \
-     -d ./zephyr/build -p always
-
-Observed result on real Raspberry Pi Zero W hardware for
-``condition_variables/simple``:
-
-- the mini-UART console prints worker progress for threads 0 through 19
-- the main thread wakes repeatedly after each condition-variable signal
-- the sample ends with ``done == 20 so everyone is done``
-- this confirms working condition-variable wait/signal behavior on target
-- this sample has also now been re-validated on real hardware with the new
-  minimal ARM1176 MMU support enabled
-
-The current verified ``condition_variables/condvar`` build command is:
-
-.. code-block:: sh
-
-   env CCACHE_DISABLE=1 west build -b rpi_zero_w \
-     zephyr/samples/kernel/condition_variables/condvar \
-     -d ./zephyr/build -p always
-
-Observed result on real Raspberry Pi Zero W hardware for
-``condition_variables/condvar``:
-
-- the waiter thread blocks until the threshold signal is sent at count 12
-- the waiter resumes, updates the shared count, and unlocks the mutex cleanly
-- the sample ends with ``Final value of count = 145. Done.``
-- this confirms working condition-variable signal, wake, and mutex interaction
-  on target
-- this sample has also now been re-validated on real hardware with the new
-  minimal ARM1176 MMU support enabled
-
-The current verified ``mem_map`` build command is:
-
-.. code-block:: sh
-
-   west build -b rpi_zero_w zephyr/tests/kernel/mem_protect/mem_map \
-     -d ./zephyr/build --pristine
-
-The current verified ``mem_map`` QEMU boot command is:
-
-.. code-block:: sh
-
-   qemu-system-arm -M raspi0 -display none -monitor none \
-     -serial null -serial stdio \
-     -kernel ./zephyr/build/zephyr/zephyr.elf
-
-Observed result under QEMU ``raspi0`` for ``mem_map`` (``mem_map`` suite):
-
-- ``test_k_mem_map_phys_bare_exec``: **FAIL** — QEMU ``raspi0`` does not model
-  the XN (Execute Never) MMU bit; no PREFETCH ABORT is generated when jumping
-  into an XN-mapped page, so the test's expected-fault path is never reached
-- ``test_k_mem_map_phys_bare_rw``: PASS — DATA ABORT on write to an RO mapping
-- ``test_k_mem_map_phys_bare_side_effect``: PASS — no unintended alias side-effects
-- ``test_k_mem_map_phys_bare_unmap_reclaim_addr``: PASS — VA region correctly
-  reclaimed and reused after ``arch_mem_unmap()``
-- ``test_k_mem_unmap_phys_bare``: PASS — DATA ABORT on access to a page after unmap
-- Overall: ``TESTSUITE mem_map failed`` (one QEMU-only XN limitation)
-
-Observed result on real Raspberry Pi Zero W hardware for ``mem_map``
-(``mem_map`` suite):
-
-- ``test_k_mem_map_phys_bare_exec``: PASS — hardware correctly generates a
-  PREFETCH ABORT at ``pc: 0x00805000`` when jumping into a page mapped without
-  execute permission, confirming the ARM1176 MMU XN bit is enforced
-- ``test_k_mem_map_phys_bare_rw``: PASS
-- ``test_k_mem_map_phys_bare_side_effect``: PASS
-- ``test_k_mem_map_phys_bare_unmap_reclaim_addr``: PASS — both mapped addresses
-  returned as ``0x7fd4d6``, confirming VA reclaim
-- ``test_k_mem_unmap_phys_bare``: PASS
-- Overall: ``TESTSUITE mem_map succeeded``
-
-This result validates the complete ``arch_mem_map()`` / ``arch_mem_unmap()``
-runtime path on real ARM1176 silicon.  The fault type ``Unknown (15)`` in the
-permission-fault cases and ``Unknown (7)`` in the translation-fault cases reflect
-that the current Zephyr DFSR decoder does not yet name ARMv6 short-descriptor
-fault status codes; the underlying MMU behavior is correct.
-
-Note on ``mem_map_api`` suite: the ``test_k_mem_map_exhaustion`` test allocates
-all available virtual pages in a loop (~16 000 iterations at 4 KB/page for
-the ~63 MB free address space on this board) and runs for several minutes.
-``test_k_mem_map_user`` auto-skips because ``CONFIG_USERSPACE`` is not enabled.
-The remaining tests (``test_k_mem_map_unmap``, ``test_k_mem_map_guard_before``,
-``test_k_mem_map_guard_after``) exercise ``k_mem_map()`` / ``k_mem_unmap()`` and
-guard-page fault enforcement but were not observed completing due to the
-exhaustion test's runtime.
-
-The current verified root cause for the D-cache failure after MMU enable is:
-
-- enabling D-cache with ``ARM_MMU_SCTLR_DCACHE_ENABLE_BIT`` caused an
-  immediate Undefined Instruction exception inside ``z_arm_mmu_init``
-- the faulting instruction was ``MRC p15, 1, r0, c0, c0, 1``
-  (the CLIDR / Cache Level ID Register read used by the CMSIS
-  ``L1C_InvalidateDCacheAll()`` function)
-- CLIDR is an ARMv7-only register; it does not exist on ARM1176 (ARMv6);
-  executing this coprocessor access on ARM1176 triggers an Undefined Instruction
-  exception which propagates through ``z_fatal_error`` to ``arch_system_halt``
-- the exception mode at the time of the fault was System mode (``SPSR_und = 0x1DF``)
-  with the CPU halted in UND mode at ``arch_system_halt+0xC`` (``b .``)
-- the symptom was that ``hello_world`` appeared to halt immediately because
-  the GDB session still held echo_bot symbols; ``info address arch_system_halt``
-  confirmed the halt location was ``arch_system_halt``, not a corrupted
-  ``uart_isr``
-- the fix is in ``arch/arm/core/mmu/arm_mmu.c`` under
-  ``#ifdef CONFIG_ARMV6_ARM1176``: replace all CMSIS cache helper calls with
-  direct MCR instructions valid on ARM1176:
-
-  - ``MCR p15, 0, r0, c7, c5, 0`` — invalidate entire I-cache (TRM B2.7.5)
-  - ``MCR p15, 0, r0, c7, c14, 0`` — clean+invalidate entire D-cache (TRM
-    B2.7.7); clean+invalidate rather than invalidate-only so that dirty lines
-    are written back on warm resets
-  - ``MCR p15, 0, r0, c7, c10, 4`` — drain write buffer / DSB (TRM B2.7.2)
-
-- ``L1C_InvalidateICacheAll()`` is also not safe to call on ARM1176 because it
-  calls CMSIS ``__DSB()`` and ``__ISB()`` internally; those expand to
-  ``dsb 0xF`` / ``isb 0xF`` which are ARMv7-only mnemonics rejected by the
-  assembler with ``-mcpu=arm1176jzf-s``
-- the broader barrier problem (``dsb``/``isb``/``dmb`` mnemonics not valid on
-  ARM1176) was fixed by overriding ``z_barrier_dsync_fence_full()``,
-  ``z_barrier_isync_fence_full()``, and ``z_barrier_dmem_fence_full()`` in
-  ``include/zephyr/arch/arm/barrier.h`` with inline MCR equivalents under
-  ``CONFIG_ARMV6_ARM1176``; the CMSIS ``cmsis_gcc.h`` file is not modified
-- ``cortex_a_r/cpu_idle.c`` was also using ``__DSB()``/``__ISB()`` directly and
-  was updated to use ``barrier_dsync_fence_full()``/``barrier_isync_fence_full()``
+     -kernel <build-dir>/zephyr/zephyr.elf
+
+Notes:
+
+- The QEMU console setup must use ``-serial null -serial stdio`` because the
+  board uses AUX mini-UART ``uart1`` as ``zephyr,console`` and QEMU wires it to
+  serial slot 1, not slot 0.
+- ``zephyr.bin`` is also confirmed usable as a Pi-style flat kernel image for
+  SD-card boot on real hardware.
+- The matching raw-image QEMU check is:
+
+  .. code-block:: sh
+
+     qemu-system-arm -M raspi0 -display none -monitor none \
+       -serial null -serial stdio \
+       -bios <build-dir>/zephyr/zephyr.bin
+
+Representative results:
+
+- ``samples/hello_world``: PASS on QEMU and hardware. Boot reaches
+  ``main()`` and prints ``Hello World! rpi_zero_w/bcm2835``.
+- ``samples/drivers/uart/echo_bot``: PASS on QEMU and hardware. RX/TX over the
+  BCM2835 AUX mini-UART path works; typing ``hello`` prints ``Echo: hello``.
+- ``samples/basic/blinky``: PASS on hardware. The ACT LED blinks and console
+  output reports LED state changes.
+- ``samples/basic/button``: PASS on hardware. GPIO17 button input works in both
+  polling and interrupt-driven form.
+- ``samples/basic/sys_heap``: PASS on QEMU. The earlier suspicious free-count
+  was a sample-side reporting artifact, not a board bug; the printed
+  ``heap size 256`` field is a sample-side constant and should not be read as
+  the true allocator size for ``z_malloc_heap``.
+- ``samples/basic/threads``: PASS on QEMU and hardware. Console activity and
+  LED toggling confirm thread scheduling, FIFO handoff, and heap use.
+- ``samples/basic/hash_map``: PASS on QEMU and hardware. The earlier silence
+  was caused by the ARM1176 unaligned-access issue, not by missing logging.
+- ``samples/subsys/logging/logger``: PASS on QEMU and hardware. Deferred
+  logging, hexdumps, severity tags, and external logger output all work.
+- ``samples/kernel/msg_queue``: PASS on hardware. The sample prints the
+  expected ``CBA012345`` urgent-before-normal receive order.
+- ``samples/kernel/condition_variables/simple``: PASS on hardware. The sample
+  ends with ``done == 20 so everyone is done``.
+- ``samples/kernel/condition_variables/condvar``: PASS on hardware. The sample
+  ends with ``Final value of count = 145. Done.``
+- ``tests/kernel/mem_protect/mem_map``: PASS on hardware. Under QEMU, all tests
+  pass except ``test_k_mem_map_phys_bare_exec`` because ``raspi0`` does not
+  model the XN bit and therefore does not generate the expected PREFETCH ABORT.
+- ``tests/kernel/mem_protect/mem_map_api``: PASS on QEMU and hardware.
+  ``test_k_mem_map_exhaustion`` completes, the guard-page tests fault as
+  expected, and ``test_k_mem_map_user`` auto-skips because
+  ``CONFIG_USERSPACE`` is not enabled.
+
+These results validate the working boot path, timer/interrupt path, console
+path, core threading/synchronization primitives, and the ARM1176 runtime MMU
+mapping path on real hardware.  The fault type ``Unknown (15)`` for permission
+faults and ``Unknown (7)`` for translation faults in the MMU tests reflects a
+current Zephyr DFSR decoder limitation for ARMv6 short-descriptor status codes;
+the underlying MMU behavior is correct.
+
+Key Debugging Notes
+*******************
+
+The main bring-up problems and their fixes were:
+
+- Earlier ``echo_bot`` RX failures were caused by recursive IRQ re-entry in the
+  shared ``cortex_a_r`` IRQ wrapper under
+  ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER``. Masking IRQs during ISR dispatch
+  fixed the problem.
+- Earlier ``logger`` and ``hash_map`` failures were caused by compiler-generated
+  unaligned accesses on the temporary ARM1176 execution path. Forcing
+  ``-mno-unaligned-access`` for BCM2835 ARM1176 builds fixed both.
+- Earlier D-cache enable failures after MMU enable were caused by ARMv7-only
+  CMSIS cache helpers. ``L1C_InvalidateDCacheAll()`` reads the ARMv7 CLIDR
+  register, which does not exist on ARM1176, and the CMSIS helpers also rely
+  on ARMv7-only ``dsb``/``isb`` mnemonics. The ARM1176 path was fixed by using
+  direct MCR-based cache and barrier operations.
+- The earlier ``mem_map_api`` corruption was caused by page-frame accounting,
+  not by ``memset()`` or by runtime PTE programming. The boot-mapped vector
+  page at ``0x8000`` sat outside ``z_mapped_start..z_mapped_end``, so the
+  generic boot-image pinning logic missed it and left the frame on the
+  anonymous free-page list. ``k_mem_map()`` could then reuse physical
+  ``0x8000`` for an anonymous page, and zeroing that page clobbered
+  ``_vector_table``. The fix in ``kernel/mmu.c`` was to add a narrow
+  ARM1176-specific vector-page accounting step in addition to the normal
+  kernel image range. It only touches pages that actually belong to the
+  generic SRAM page-frame database, so other targets are unaffected. If
+  another target later needs the same treatment for some other boot-mapped RAM
+  range, that logic can be generalized at that time.
 
 SD Card Boot Guide
 ******************
@@ -891,9 +560,8 @@ Open Risks
   it is still a workaround on top of the temporary shared ``cortex_a_r`` path
   rather than a dedicated ARM11 architecture solution.
 - The ARM1176 MMU bring-up milestone is complete for bare-metal kernel-space use.
-  ``arch_mem_map()`` / ``arch_mem_unmap()`` are hardware-validated via
-  ``tests/kernel/mem_protect/mem_map``, including XN (Execute Never) enforcement.
-  The atomic backend remains intentionally conservative
+  ``arch_mem_map()`` / ``arch_mem_unmap()`` are hardware-validated, including
+  XN enforcement.  The atomic backend remains intentionally conservative
   (``CONFIG_ATOMIC_OPERATIONS_C``) and can be revisited after the
   ``cortex_a_r`` shared-path risk is resolved.
 - ``CONFIG_USERSPACE`` is the next major MMU topic: it requires implementing
@@ -912,31 +580,22 @@ Recommended Next Steps
 
 Work in this order unless new hardware results force a change:
 
-1. Complete ``tests/kernel/mem_protect/mem_map_api`` validation on hardware:
-
-   - ``test_k_mem_map_exhaustion`` runs for several minutes (16 000+ page
-     allocations); let it finish or add a board overlay to skip it
-   - ``test_k_mem_map_unmap``, ``test_k_mem_map_guard_before``, and
-     ``test_k_mem_map_guard_after`` should pass once exhaustion completes;
-     they test ``k_mem_map()`` / ``k_mem_unmap()`` and guard-page fault
-     enforcement via the higher-level kernel API
-
-2. Continue reducing ARM1176-specific assumptions inside the shared
+1. Continue reducing ARM1176-specific assumptions inside the shared
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.  The shared path is still the largest architectural risk.
 
-3. Revisit the atomic backend: now that the MMU path is stable, evaluate
+2. Revisit the atomic backend: now that the MMU path is stable, evaluate
    whether ``CONFIG_ATOMIC_OPERATIONS_C`` can be replaced with real
    ``LDREX``/``STREX`` exclusive accesses under the MMU.
 
-4. Expand real-hardware validation beyond the already working timer tick,
+3. Expand real-hardware validation beyond the already working timer tick,
    mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
 
-5. Decide whether to continue with incremental ARM1176 support inside the
+4. Decide whether to continue with incremental ARM1176 support inside the
    shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under
    ``arch/arm``.  The current scaffolding is a known temporary shortcut.
 
-6. Once core ARM1176 execution and interrupt behavior are less risky,
+5. Once core ARM1176 execution and interrupt behavior are less risky,
    follow-up work can expand into:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
@@ -945,7 +604,7 @@ Work in this order unless new hardware results force a change:
    - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
 
-7. ``CONFIG_USERSPACE`` is a separate, large project.  Prerequisites before
+6. ``CONFIG_USERSPACE`` is a separate, large project.  Prerequisites before
    starting:
 
    - stable ARM1176 execution path (ideally a dedicated arch path, not

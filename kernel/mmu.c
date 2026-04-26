@@ -1051,7 +1051,7 @@ static void mark_linker_section_pinned(void *start_addr, void *end_addr,
 		}
 	}
 }
-#endif /* CONFIG_LINKER_USE_BOOT_SECTION) || CONFIG_LINKER_USE_PINNED_SECTION */
+#endif /* CONFIG_LINKER_USE_BOOT_SECTION || CONFIG_LINKER_USE_PINNED_SECTION */
 
 #ifdef CONFIG_LINKER_USE_ONDEMAND_SECTION
 static void z_paging_ondemand_section_map(void)
@@ -1120,6 +1120,28 @@ void z_mem_manage_init(void)
 		 */
 		k_mem_page_frame_set(pf, K_MEM_PAGE_FRAME_PINNED);
 	}
+
+#ifdef CONFIG_CPU_ARM1176JZF_S
+	/* ARM1176 on the temporary A/R linker path keeps vectors in a
+	 * boot-mapped RAM page before z_mapped_start. Account for that page
+	 * too so its frame does not remain on the anonymous free-page list.
+	 * If another target needs similar treatment later, this can be
+	 * generalized.
+	 */
+	VIRT_FOREACH(_vector_start, ROUND_UP((uintptr_t)(_vector_end - _vector_start),
+					     CONFIG_MMU_PAGE_SIZE), addr)
+	{
+		uintptr_t vector_phys = K_MEM_BOOT_VIRT_TO_PHYS(addr);
+
+		if (!k_mem_is_page_frame(vector_phys)) {
+			continue;
+		}
+
+		pf = k_mem_phys_to_page_frame(vector_phys);
+		frame_mapped_set(pf, addr);
+		k_mem_page_frame_set(pf, K_MEM_PAGE_FRAME_PINNED);
+	}
+#endif /* CONFIG_CPU_ARM1176JZF_S */
 #endif /* CONFIG_LINKER_GENERIC_SECTIONS_PRESENT_AT_BOOT */
 
 #ifdef CONFIG_LINKER_USE_BOOT_SECTION
