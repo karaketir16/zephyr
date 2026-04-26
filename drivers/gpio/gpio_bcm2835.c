@@ -317,7 +317,9 @@ static int gpio_bcm2835_init(const struct device *port)
 	DEVICE_MMIO_NAMED_MAP(port, reg_base, K_MEM_CACHE_NONE);
 	data->base = DEVICE_MMIO_NAMED_GET(port, reg_base);
 
-	cfg->irq_config_func();
+	if (cfg->irq_config_func != NULL) {
+		cfg->irq_config_func();
+	}
 
 	return 0;
 }
@@ -336,6 +338,7 @@ static DEVICE_API(gpio, gpio_bcm2835_api) = {
 #define GPIO_BCM2835_INST(n)                                                                       \
 	static struct gpio_bcm2835_data gpio_bcm2835_data_##n;                                   \
                                                                                                    \
+	IF_ENABLED(DT_INST_NODE_HAS_PROP(n, interrupts), (                                       \
 	static void gpio_bcm2835_irq_config_func_##n(void)                                       \
 	{                                                                                          \
 		IRQ_CONNECT(DT_INST_IRQN(n),                                                       \
@@ -346,11 +349,14 @@ static DEVICE_API(gpio, gpio_bcm2835_api) = {
 			    DEVICE_DT_INST_GET(n), 0);                                         \
 		irq_enable(DT_INST_IRQN(n));                                                       \
 	}                                                                                          \
+	))                                                                                         \
                                                                                                    \
 	static const struct gpio_bcm2835_config gpio_bcm2835_cfg_##n = {                         \
 		.common = GPIO_COMMON_CONFIG_FROM_DT_INST(n),                                    \
 		DEVICE_MMIO_NAMED_ROM_INIT(reg_base, DT_INST_PARENT(n)),                         \
-		.irq_config_func = gpio_bcm2835_irq_config_func_##n,                             \
+		.irq_config_func = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, interrupts),            \
+					       (gpio_bcm2835_irq_config_func_##n),         \
+					       (NULL)),                                  \
 		.offset = DT_INST_REG_ADDR(n),                                                   \
 		.ngpios = DT_INST_PROP(n, ngpios),                                               \
 	};                                                                                         \

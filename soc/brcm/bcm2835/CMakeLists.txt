@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 zephyr_include_directories(.)
-zephyr_sources(pinctrl_stub.c)
+zephyr_sources(pinctrl_stub.c bcm2835_mbox.c)
 zephyr_sources_ifdef(CONFIG_ARM_AARCH32_MMU mmu_regions.c)
 zephyr_cc_option_ifdef(CONFIG_ARMV6_ARM1176 -mno-unaligned-access)
 

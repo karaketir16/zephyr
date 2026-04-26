@@ -18,6 +18,7 @@
 
 	aliases {
 		led0 = &act_led;
+		sdhc0 = &sdhci0;
 	};
 
 	chosen {
@@ -49,6 +50,22 @@
 			bias-pull-up;
 		};
 	};
+
+	sdhci0_default: sdhci0_default {
+		group1 {
+			pinmux = <BCM2835_PINMUX(34, BCM2835_ALT3)>;
+			bias-disable;
+		};
+
+		group2 {
+			pinmux = <BCM2835_PINMUX(35, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(36, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(37, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(38, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(39, BCM2835_ALT3)>;
+			bias-pull-up;
+		};
+	};
 };
 
 &system_timer {
@@ -59,9 +76,26 @@
 	status = "okay";
 };
 
+&gpio1 {
+	status = "okay";
+};
+
 &uart1 {
 	current-speed = <115200>;
 	pinctrl-0 = <&uart1_default>;
 	pinctrl-names = "default";
 	status = "okay";
+};
+
+&sdhci0 {
+	pinctrl-0 = <&sdhci0_default>;
+	pinctrl-names = "default";
+	non-removable;
+	status = "okay";
+
+	wifi: airoc-wifi {
+		compatible = "infineon,airoc-wifi";
+		wifi-reg-on-gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
 };

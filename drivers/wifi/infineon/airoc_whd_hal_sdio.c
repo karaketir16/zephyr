@@ -107,19 +107,20 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 	/* Init wifi host driver (whd) */
 	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops, buffer_if,
 				     netif_funcs);
-	if (whd_ret == CY_RSLT_SUCCESS) {
-		whd_ret = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config,
-					      (whd_sdio_t)&data->card);
-
-		if (whd_ret == CY_RSLT_SUCCESS) {
-			whd_ret = whd_wifi_on(data->whd_drv, interface);
-		}
-
-		if (whd_ret != CY_RSLT_SUCCESS) {
-			whd_deinit(*interface);
-			return -ENODEV;
-		}
+	if (whd_ret != CY_RSLT_SUCCESS) {
+		return -ENODEV;
 	}
+
+	whd_ret = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config, (whd_sdio_t)&data->card);
+	if (whd_ret == CY_RSLT_SUCCESS) {
+		whd_ret = whd_wifi_on(data->whd_drv, interface);
+	}
+
+	if (whd_ret != CY_RSLT_SUCCESS) {
+		whd_deinit(*interface);
+		return -ENODEV;
+	}
+
 	return 0;
 }
 

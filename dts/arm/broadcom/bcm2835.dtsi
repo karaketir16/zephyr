@@ -50,6 +50,15 @@
 				status = "disabled";
 			};
 
+			gpio1: gpio@1c {
+				compatible = "brcm,bcm2835-gpio";
+				reg = <28>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				ngpios = <18>;
+				status = "disabled";
+			};
+
 			/*
 			 * Expose the upper GPIO bank first because the Pi Zero W ACT LED
 			 * lives on GPIO47. This keeps initial GPIO enablement minimal while
@@ -106,6 +115,18 @@
 			interrupt-parent = <&intc>;
 			interrupts = <29>;
 			clock-frequency = <250000000>;
+			status = "disabled";
+		};
+
+		sdhci0: sdhc@20300000 {
+			compatible = "brcm,bcm2835-sdhci";
+			reg = <0x20300000 0x100>;
+			interrupt-parent = <&intc>;
+			interrupts = <30>;
+			bus-width = <4>;
+			min-bus-freq = <400000>;
+			max-bus-freq = <50000000>;
+			power-delay-ms = <50>;
 			status = "disabled";
 		};
 	};

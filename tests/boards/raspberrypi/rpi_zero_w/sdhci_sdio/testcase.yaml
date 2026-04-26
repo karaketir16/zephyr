@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+
+common:
+  tags:
+    - sdhc
+    - sdio
+tests:
+  boards.rpi_zero_w.sdhci_sdio:
+    harness: ztest
+    platform_allow:
+      - rpi_zero_w/bcm2835
+    build_only: true

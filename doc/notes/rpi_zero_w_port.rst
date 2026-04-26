@@ -100,6 +100,9 @@ The following pieces now exist in-tree:
   base board description.
 - Minimal BCM2835 pinctrl support for Pi Zero W mini-UART GPIO14/GPIO15 muxing
   and pull configuration.
+- Initial Pi Zero W Wi-Fi groundwork in devicetree: the BCM2835 SDHCI host
+  node, SDIO pinctrl for GPIO34..GPIO39, and the CYW43438 ``wifi-reg-on``
+  control GPIO on GPIO41.
 - ARM1176JZF-S CPU selection and ``-mcpu=arm1176jzf-s`` toolchain mapping.
 - ARM1176-specific compile fixes in the shared ``cortex_a_r`` path for:
 
@@ -251,6 +254,8 @@ finished port:
   the Pi Zero W mini-UART bring-up path on GPIO14/GPIO15.
 - The current BCM2835 GPIO bring-up is still intentionally minimal and only
   covers the banks needed for the ACT LED and the temporary GPIO17 button test.
+- The on-board CYW43438 has board-level SDIO and Wi-Fi devicetree wiring plus a
+  first-pass BCM2835 SDHCI host driver; it is still not hardware-validated.
 - ``drivers/interrupt_controller/intc_bcm2835_armctrl.c`` is a first-pass
   driver aimed at minimal bring-up.
 - ``drivers/timer/bcm2835_system_timer.c`` is a first-pass periodic timer

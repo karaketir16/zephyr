@@ -1,0 +1,22 @@
+# Copyright (c) 2026
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config SDHC_BCM2835
+	bool "Broadcom BCM2835 SDHCI driver"
+	default y
+	depends on DT_HAS_BRCM_BCM2835_SDHCI_ENABLED
+	select PINCTRL
+	select SDHC_SUPPORTS_NATIVE_MODE
+	help
+	  Enable the Broadcom BCM2835 Arasan-compatible SDHCI host driver.
+
+config SDHC_BCM2835_VERBOSE
+	bool "Verbose SDHCI command tracing (bring-up only)"
+	depends on SDHC_BCM2835
+	default n
+	help
+	  Log every SD/SDIO command issued by the host (opcode, argument, native
+	  response type, IRQ status, short responses, and decode errors). Enable
+	  with CONFIG_SDHC_LOG_LEVEL_DBG=y or INF as needed. Intended for hardware
+	  bring-up; disable for production images.

@@ -157,6 +157,13 @@ static int sd_init_io(struct sd_card *card)
 	}
 	sd_delay(card->host_props.power_delay);
 	bus_io->power_mode = SDHC_POWER_ON;
+	/*
+	 * Enable SDCLK together with bus power. SDIO devices and the physical-layer
+	 * guidance expect the host to provide (at least idle/low) clock while the
+	 * card powers up; a long power_delay with the card clock gated (common on
+	 * SDHCI) can leave the card not responding to CMD8/CMD5 (command timeout).
+	 */
+	bus_io->clock = SDMMC_CLOCK_400KHZ;
 	ret = sdhc_set_io(card->sdhc, bus_io);
 	if (ret) {
 		LOG_ERR("Could not %s card power via SDHC", "enable");
@@ -166,15 +173,8 @@ static int sd_init_io(struct sd_card *card)
 	card->card_voltage = voltage;
 	/* Reset card flags */
 	card->flags = 0U;
-	/* Delay so card can power up */
+	/* Card stabilizes while SDCLK is running */
 	sd_delay(card->host_props.power_delay);
-	/* Start bus clock */
-	bus_io->clock = SDMMC_CLOCK_400KHZ;
-	ret = sdhc_set_io(card->sdhc, bus_io);
-	if (ret) {
-		LOG_ERR("Could not start bus clock");
-		return ret;
-	}
 	return 0;
 }
 
@@ -236,6 +236,7 @@ mmc_init:
 	}
 #endif /* CONFIG_MMC_STACK */
 	/* Unknown card type */
+	LOG_WRN("SD card init: SDIO, SDMMC, and MMC identification all failed");
 	return -ENOTSUP;
 }
 

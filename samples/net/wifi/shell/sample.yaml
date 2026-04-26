@@ -100,6 +100,10 @@ tests:
       - esp32s3_devkitc/esp32s3/procpu
       - esp8684_devkitm
       - esp32c6_devkitc/esp32c6/hpcore
+  sample.net.wifi.rpi_zero_w:
+    build_only: true
+    platform_allow:
+      - rpi_zero_w/bcm2835
   sample.net.wifi.siwx91x_offloaded:
     extra_args:
       - CONFIG_WIFI_SILABS_SIWX91X_NET_STACK_OFFLOAD=y

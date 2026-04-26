@@ -39,12 +39,16 @@ static int sdio_send_ocr(struct sd_card *card, uint32_t ocr)
 	for (retries = 0; retries < CONFIG_SD_OCR_RETRY_COUNT; retries++) {
 		ret = sdhc_request(card->sdhc, &cmd, NULL);
 		if (ret) {
+			LOG_DBG("SDIO CMD5 ocr_arg=0x%08x try=%d sdhc_request err=%d", ocr, retries,
+				ret);
 			if (ocr == 0) {
 				/* Just probing card, likely not SDIO */
 				return SD_NOT_SDIO;
 			}
 			return ret;
 		}
+		LOG_DBG("SDIO CMD5 ocr_arg=0x%08x try=%d resp0=0x%08x", ocr, retries,
+			cmd.response[0]);
 		if (ocr == 0) {
 			/* We are probing card, check number of IO functions */
 			card->num_io = (cmd.response[0] & SDIO_OCR_IO_NUMBER)
@@ -53,9 +57,15 @@ static int sdio_send_ocr(struct sd_card *card, uint32_t ocr)
 				((cmd.response[0] & SDIO_IO_OCR_MASK) == 0)) {
 				if (cmd.response[0] & SDIO_OCR_MEM_PRESENT_FLAG) {
 					/* Card is not an SDIO card */
+					LOG_DBG("SDIO CMD5 probe: memory present, not SDIO (R4 resp0=0x%08x)",
+						cmd.response[0]);
 					return SD_NOT_SDIO;
 				}
 				/* Card is not a supported SD device */
+				LOG_WRN("SDIO CMD5 probe: invalid R4 resp0=0x%08x num_io=%u "
+					"io_ocr_masked=0x%06x (expect I/O functions + voltage window)",
+					cmd.response[0], card->num_io,
+					(unsigned int)(cmd.response[0] & SDIO_IO_OCR_MASK));
 				return -ENOTSUP;
 			}
 			/* Card has IO present, return zero to

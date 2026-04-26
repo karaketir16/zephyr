@@ -1,0 +1,30 @@
+# Copyright (c) 2026
+#
+# SPDX-License-Identifier: Apache-2.0
+
+title: Broadcom BCM2835 SDHCI Host Controller
+
+description: Broadcom BCM2835 Arasan-compatible SDHCI controller used for SDIO on Raspberry Pi boards.
+
+compatible: "brcm,bcm2835-sdhci"
+
+include: [sdhc.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  bus-width:
+    type: int
+    default: 1
+    description: Number of data lines wired to the controller.
+    enum:
+      - 1
+      - 4
+
+  non-removable:
+    type: boolean
+    description: The attached device is soldered down and always present.
