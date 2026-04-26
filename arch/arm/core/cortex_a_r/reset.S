@@ -104,8 +104,9 @@ EL1_Reset_Handler:
     /*
      * ARM1176 firmware handoff is not guaranteed to leave caches, MMU, or the
      * high-vector setting in the exact state Zephyr expects. Normalize the CPU
-     * into SVC32, invalidate caches/TLBs, and clear the relevant SCTLR bits
-     * before continuing with Zephyr stack and vector setup.
+     * into a known ARM/SVC exception model, invalidate caches/TLBs, and clear
+     * the relevant SCTLR bits before continuing with Zephyr stack and vector
+     * setup.
      */
     mrs r0, cpsr
     bic r0, r0, #0x3f
@@ -119,12 +120,17 @@ EL1_Reset_Handler:
     instr_sync_barrier
 
     mrc p15, 0, r0, c1, c0, 0
+    bic r0, r0, #0x40000000        /* clear TE (Thumb exceptions) */
+    bic r0, r0, #0x03000000        /* clear VE/EE */
+    bic r0, r0, #0x00200000        /* clear FI (low interrupt latency) */
+    bic r0, r0, #0x00000030        /* clear legacy P/D state */
     bic r0, r0, #0x2000            /* clear V (high vectors) */
     bic r0, r0, #0x0200            /* clear RR (round-robin replacement) */
     bic r0, r0, #0x0100            /* clear L4 */
     bic r0, r0, #0x0080            /* clear I (instruction cache) */
     bic r0, r0, #0x0004            /* clear C (data/unified cache) */
     bic r0, r0, #0x0001            /* clear M (MMU) */
+    orr r0, r0, #0x00000030        /* force 32-bit exception/address model */
     orr r0, r0, #0x00000002        /* keep alignment fault checking enabled */
     mcr p15, 0, r0, c1, c0, 0
     data_sync_barrier
