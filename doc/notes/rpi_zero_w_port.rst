@@ -326,10 +326,10 @@ Representative results:
 
 These results validate the working boot path, timer/interrupt path, console
 path, core threading/synchronization primitives, and the ARM1176 runtime MMU
-mapping path on real hardware.  The fault type ``Unknown (15)`` for permission
-faults and ``Unknown (7)`` for translation faults in the MMU tests reflects a
-current Zephyr DFSR decoder limitation for ARMv6 short-descriptor status codes;
-the underlying MMU behavior is correct.
+mapping path on real hardware. ARM1176 short-descriptor DFSR/IFSR decoding has
+now also been taught the relevant second-level translation and permission fault
+codes, so MMU test failures now report named ARM faults instead of raw
+``Unknown (...)`` status numbers.
 
 Key Debugging Notes
 *******************

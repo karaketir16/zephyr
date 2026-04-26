@@ -55,6 +55,17 @@ static void dump_debug_event(void)
 	EXCEPTION_DUMP("Debug Event (%s)", get_dbgdscr_moe_string(moe));
 }
 
+#if defined(CONFIG_ARMV6_ARM1176) && defined(CONFIG_USERSPACE)
+static bool arm1176_memory_fault_recoverable_status(uint32_t fs)
+{
+	return (fs == FSR_FS_BACKGROUND_FAULT)
+		|| (fs == FSR_FS_TRANSLATION_FAULT)
+		|| (fs == FSR_FS_TRANSLATION_FAULT_2ND_LEVEL)
+		|| (fs == FSR_FS_PERMISSION_FAULT)
+		|| (fs == FSR_FS_PERMISSION_FAULT_2ND_LEVEL);
+}
+#endif
+
 static uint32_t dump_fault(uint32_t status, uint32_t addr)
 {
 	uint32_t reason = K_ERR_CPU_EXCEPTION;
@@ -157,6 +168,31 @@ static uint32_t dump_fault(uint32_t status, uint32_t addr)
 		reason = K_ERR_ARM_SYNC_PARITY_ERROR_TRANSLATION_TABLE_2ND_LEVEL;
 		EXCEPTION_DUMP("2nd Level Synchronous Parity Error Translation Table @ 0x%08x",
 				addr);
+		break;
+#elif defined(CONFIG_ARMV6_ARM1176)
+	case FSR_FS_TRANSLATION_FAULT:
+		reason = K_ERR_ARM_TRANSLATION_FAULT;
+		EXCEPTION_DUMP("1st Level Translation Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_TRANSLATION_FAULT_2ND_LEVEL:
+		reason = K_ERR_ARM_TRANSLATION_FAULT_2ND_LEVEL;
+		EXCEPTION_DUMP("2nd Level Translation Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_PERMISSION_FAULT_2ND_LEVEL:
+		reason = K_ERR_ARM_PERMISSION_FAULT_2ND_LEVEL;
+		EXCEPTION_DUMP("2nd Level Permission Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_DOMAIN_FAULT_1ST_LEVEL:
+		reason = K_ERR_ARM_DOMAIN_FAULT_1ST_LEVEL;
+		EXCEPTION_DUMP("1st Level Domain Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_DOMAIN_FAULT_2ND_LEVEL:
+		reason = K_ERR_ARM_DOMAIN_FAULT_2ND_LEVEL;
+		EXCEPTION_DUMP("2nd Level Domain Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_TLB_CONFLICT_ABORT:
+		reason = K_ERR_ARM_TLB_CONFLICT_ABORT;
+		EXCEPTION_DUMP("TLB Conflict Abort @ 0x%08x", addr);
 		break;
 #else
 	case FSR_FS_BACKGROUND_FAULT:
@@ -403,10 +439,14 @@ bool z_arm_fault_data(struct arch_esf *esf)
 #endif
 
 #if defined(CONFIG_USERSPACE)
+#if defined(CONFIG_ARMV6_ARM1176)
+	if (arm1176_memory_fault_recoverable_status(fs)) {
+#else
 	if ((fs == COND_CODE_1(CONFIG_AARCH32_ARMV8_R,
 				(FSR_FS_TRANSLATION_FAULT),
 				(FSR_FS_BACKGROUND_FAULT)))
 			|| (fs == FSR_FS_PERMISSION_FAULT)) {
+#endif
 		if (memory_fault_recoverable(esf)) {
 			return false;
 		}
