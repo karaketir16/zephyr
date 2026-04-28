@@ -14,6 +14,13 @@
    <a href="https://scorecard.dev/viewer/?uri=github.com/zephyrproject-rtos/zephyr"><img src="https://api.securityscorecards.dev/projects/github.com/zephyrproject-rtos/zephyr/badge"></a>
    <a href="https://github.com/zephyrproject-rtos/zephyr/actions/workflows/twister.yaml?query=branch%3Amain"><img src="https://github.com/zephyrproject-rtos/zephyr/actions/workflows/twister.yaml/badge.svg?event=push"></a>
 
+Raspberry Pi Zero W Fork
+************************
+
+Raspberry Pi Zero W quick start: `doc/notes/rpi_zero_w_quick_start.rst`_
+
+Detailed port notes: `doc/notes/rpi_zero_w_port.rst`_
+
 
 The Zephyr Project is a scalable real-time operating system (RTOS) supporting
 multiple hardware architectures, optimized for resource constrained devices,
@@ -28,6 +35,9 @@ Cortex-R, Cortex-M), Intel x86, ARC, Tensilica Xtensa, and RISC-V,
 SPARC, MIPS, and a large number of `supported boards`_.
 
 .. below included in doc/introduction/introduction.rst
+
+.. _doc/notes/rpi_zero_w_quick_start.rst: doc/notes/rpi_zero_w_quick_start.rst
+.. _doc/notes/rpi_zero_w_port.rst: doc/notes/rpi_zero_w_port.rst
 
 
 Getting Started
