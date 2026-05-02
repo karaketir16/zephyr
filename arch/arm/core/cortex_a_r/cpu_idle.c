@@ -15,6 +15,17 @@
 #include <zephyr/sys/barrier.h>
 #include <zephyr/tracing/tracing.h>
 
+#if defined(CONFIG_ARMV6_ARM1176)
+static ALWAYS_INLINE void arm_idle_wait_for_interrupt(void)
+{
+	uint32_t zero = 0U;
+
+	__asm__ volatile("mcr p15, 0, %0, c7, c0, 4" : : "r"(zero) : "memory");
+}
+#else
+#define arm_idle_wait_for_interrupt __WFI
+#endif
+
 #if defined(CONFIG_ARM_ON_EXIT_CPU_IDLE)
 #define ON_EXIT_IDLE_HOOK SOC_ON_EXIT_CPU_IDLE
 #else
@@ -53,7 +64,7 @@ void arch_cpu_idle(void)
 #endif
 
 	/* Enter low power state */
-	SLEEP_IF_ALLOWED(__WFI);
+	SLEEP_IF_ALLOWED(arm_idle_wait_for_interrupt);
 
 	/*
 	 * Clear PRIMASK and flush instruction buffer to immediately service
