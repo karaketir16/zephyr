@@ -105,7 +105,13 @@
 			reg = <0x20215040 0x40>;
 			interrupt-parent = <&intc>;
 			interrupts = <29>;
-			clock-frequency = <250000000>;
+			/*
+			 * Raspberry Pi mini-UART baud generation depends on the
+			 * VPU/core clock. On Pi Zero W the default firmware
+			 * core_freq is 400 MHz, so describe that here to make
+			 * the default serial console baud match real hardware.
+			 */
+			clock-frequency = <400000000>;
 			status = "disabled";
 		};
 	};
