@@ -20,6 +20,17 @@ The following have been run on real Raspberry Pi Zero W hardware:
 - ``samples/kernel/condition_variables/simple``
 - ``samples/kernel/condition_variables/condvar``
 - ``tests/kernel/mem_protect/mem_map``
+- ``tests/kernel/timer/timer_monotonic``
+- ``tests/kernel/sleep``
+- ``tests/kernel/timer/timer_api``
+- ``tests/kernel/timer/timer_behavior``
+- ``tests/kernel/workq/work_queue``
+- ``tests/kernel/sched/preempt``
+- ``tests/kernel/pipe/pipe_api``
+- ``tests/kernel/fatal/exception``
+- ``tests/kernel/common``
+- ``tests/kernel/threads/thread_apis``
+- ``tests/kernel/mutex/mutex_api``
 
 Notes:
 
@@ -31,6 +42,12 @@ Notes:
   external ``led1`` on GPIO27.
 - ``tests/kernel/mem_protect/mem_map`` is the current MMU validation
   test that have been run on hardware.
+- The timer/scheduler validation set covers monotonic cycle reads, sleeps,
+  timer APIs, timer jitter/drift behavior, delayed work, preemption, and pipe
+  concurrency on real hardware.
+- The broader kernel validation set now also covers fatal exceptions, common
+  kernel helpers, thread lifecycle APIs, and mutex priority-inheritance paths
+  on real hardware.
 
 Build A Sample
 **************
