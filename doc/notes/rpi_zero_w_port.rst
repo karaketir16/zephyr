@@ -11,7 +11,14 @@ initial GPIO and logging:
 ``samples/basic/hash_map``, ``samples/subsys/logging/logger``,
 ``samples/kernel/msg_queue``,
 ``samples/kernel/condition_variables/simple``, and
-``samples/kernel/condition_variables/condvar``.
+``samples/kernel/condition_variables/condvar``.  The timer and scheduler
+validation set now also includes ``tests/kernel/timer/timer_monotonic``,
+``tests/kernel/sleep``, ``tests/kernel/timer/timer_api``,
+``tests/kernel/timer/timer_behavior``, ``tests/kernel/workq/work_queue``,
+``tests/kernel/sched/preempt``, and ``tests/kernel/pipe/pipe_api`` on real
+hardware.  The broader kernel validation set now also includes
+``tests/kernel/fatal/exception``, ``tests/kernel/common``,
+``tests/kernel/threads/thread_apis``, and ``tests/kernel/mutex/mutex_api``.
 
 Current State
 *************
@@ -60,6 +67,56 @@ Current State
   ``raspi0``. ``test_k_mem_map_exhaustion`` completes, the guard-page tests
   fault as expected, and ``test_k_mem_map_user`` still auto-skips because
   ``CONFIG_USERSPACE`` is not enabled.
+- ``tests/kernel/timer/timer_monotonic`` now passes on real Raspberry Pi Zero W
+  hardware.  ``k_cycle_get_32()`` remained monotonic over the test loop, and
+  the one-second clock-frequency check reported the expected 1 MHz system
+  counter rate within tolerance.
+- ``tests/kernel/sleep`` now passes on real Raspberry Pi Zero W hardware.  This
+  validates ``k_sleep()``, ``k_usleep()``, ``K_FOREVER`` sleep, normal wakeup,
+  and the test's ISR wake path on the current periodic system timer.
+- ``tests/kernel/timer/timer_api`` now passes on real Raspberry Pi Zero W
+  hardware (15 tests).  This covers absolute sleeps/timeouts, periodic timers,
+  one-shot timers, ``K_FOREVER`` timer periods, timer restart, remaining-time
+  queries, status/status-sync behavior, user data, and time conversions.
+- ``tests/kernel/timer/timer_behavior`` now passes on real Raspberry Pi Zero W
+  hardware.  The jitter/drift subtests ran for roughly 200 seconds total with
+  no failures; the 1 ms requested period is quantized to the board's current
+  100 Hz / 10 ms tick, as expected, and the total drift was within a few
+  microseconds.  The one-tick timer train also completed with no late
+  callbacks across four timers.
+- ``tests/kernel/workq/work_queue`` now passes on real Raspberry Pi Zero W
+  hardware (18 tests), covering workqueue start/stop/run behavior, delayed
+  work, cancellation, pending checks, triggered work, message-queue-triggered
+  work, and timeout-backed work.
+- ``tests/kernel/sched/preempt`` now passes on real Raspberry Pi Zero W
+  hardware.
+- ``tests/kernel/pipe/pipe_api`` now passes on real Raspberry Pi Zero W
+  hardware (18 tests), including basic pipe behavior, timeout cases,
+  close/reset interactions during reads and writes, partial read/write
+  concurrency, and the pipe stress cases.
+- ``tests/kernel/fatal/exception`` now passes on real Raspberry Pi Zero W
+  hardware.  The test intentionally exercises PREFETCH ABORT, UNDEFINED
+  INSTRUCTION ABORT, kernel oops, kernel panic, assertion failure, and
+  arbitrary fatal error reasons.  The test harness catches each fatal path and
+  continues, giving real hardware coverage for exception/fatal entry and
+  recovery-to-test behavior.
+- ``tests/kernel/common`` now passes on real Raspberry Pi Zero W hardware.  The
+  run covered atomics, bit arrays, boot delay, byte order helpers, 32-bit clock
+  cycles, uptime, millisecond timing, timeout ordering, errno context,
+  ``irq_offload()``, multilib selection, power-of-two helpers, and ``printk``.
+  ``test_clock_cycle_64`` and ``test_nested_irq_offload`` skip on the current
+  configuration.
+- ``tests/kernel/threads/thread_apis`` now passes on real Raspberry Pi Zero W
+  hardware.  The run covered thread spawn/start, delayed spawn, join and
+  join-deadlock handling, abort from thread and ISR context, essential-thread
+  fatal paths, priority changes, suspend/resume, timeout remaining,
+  thread-name APIs, runtime stats, thread iteration, custom data, and
+  cooperative/preemptible suspend/resume behavior.  CPU-mask and one
+  user-thread-name case skip on the current configuration.
+- ``tests/kernel/mutex/mutex_api`` now passes on real Raspberry Pi Zero W
+  hardware.  The run covered recursive mutexes, reentrant lock attempts with
+  no-wait/timeout/forever behavior, priority inheritance, complex priority
+  inversion, and timeout races during priority inversion.
 - The ARM1176 MMU bring-up milestone is now complete for bare-metal kernel-space
   use.  ``CONFIG_USERSPACE`` and per-thread address-space management are the next
   major MMU topic but are deferred as a separate project.
@@ -261,8 +318,9 @@ finished port:
   driver aimed at minimal bring-up.
 - ``drivers/timer/bcm2835_system_timer.c`` is a first-pass periodic timer
   driver. Timeout reprogramming and richer timer behavior are not implemented.
-- ``rpi_zero_w`` should still be treated as experimental until timer IRQ
-  delivery and broader hardware behavior are validated beyond first console
+- ``rpi_zero_w`` should still be treated as experimental, but timer IRQ
+  delivery, sleeps, timers, delayed work, preemption, and several kernel
+  concurrency paths now have real-hardware validation beyond first console
   output.
 
 What Has Been Verified
@@ -329,6 +387,40 @@ Representative results:
   ``test_k_mem_map_exhaustion`` completes, the guard-page tests fault as
   expected, and ``test_k_mem_map_user`` auto-skips because
   ``CONFIG_USERSPACE`` is not enabled.
+- ``tests/kernel/timer/timer_monotonic``: PASS on hardware.  The monotonic
+  cycle loop completes and the one-second clock-frequency check reports the
+  expected 1 MHz system counter within tolerance.
+- ``tests/kernel/sleep``: PASS on hardware.  ``k_sleep()``, ``k_usleep()``,
+  forever sleep, normal wakeup, and ISR wakeup all complete successfully.
+- ``tests/kernel/timer/timer_api``: PASS on hardware.  All 15 timer API tests
+  pass, including absolute timeout/sleep behavior, periodic timers, one-shot
+  timers, timer restart, remaining/status/status-sync queries, and timer user
+  data.
+- ``tests/kernel/timer/timer_behavior``: PASS on hardware.  The jitter/drift
+  tests run for about 200 seconds total and the one-tick timer train completes
+  with no late callbacks.  Because the board currently uses a 100 Hz periodic
+  system tick, the 1 ms requested test period is expected to quantize to
+  approximately 10 ms.
+- ``tests/kernel/workq/work_queue``: PASS on hardware.  All 18 workqueue tests
+  pass, including delayed work, cancellation, triggered work, message-queue
+  triggering, and timeout-backed work.
+- ``tests/kernel/sched/preempt``: PASS on hardware.
+- ``tests/kernel/pipe/pipe_api``: PASS on hardware.  All 18 pipe API tests
+  pass, including basic, concurrency, timeout, close/reset, partial transfer,
+  and stress coverage.
+- ``tests/kernel/fatal/exception``: PASS on hardware.  The test exercises
+  PREFETCH ABORT, UNDEFINED INSTRUCTION ABORT, kernel oops, kernel panic,
+  assertion failure, and arbitrary fatal reasons, and the test harness catches
+  each fatal path successfully.
+- ``tests/kernel/common``: PASS on hardware.  The run passes 61 checks with
+  two expected skips on the current configuration: ``test_clock_cycle_64`` and
+  ``test_nested_irq_offload``.
+- ``tests/kernel/threads/thread_apis``: PASS on hardware.  The run passes 41
+  checks with two expected skips on the current configuration, covering thread
+  lifecycle, abort, join, priority, suspend/resume, delayed start, thread
+  iteration, and essential-thread fatal paths.
+- ``tests/kernel/mutex/mutex_api``: PASS on hardware.  All 9 mutex API tests
+  pass, including priority inheritance and priority-inversion timeout races.
 - ``samples/basic/atomic_set``: PASS on hardware as a development-only
   ARM1176 exclusive-access probe. It directly exercises ``LDREX``/``STREX`` on
   permanent writable image RAM, permanent page-aligned writable RAM, and
@@ -336,11 +428,13 @@ Representative results:
   normal board-validation sample, and it is independent of whichever Zephyr
   atomic backend is selected for the build.
 
-These results validate the working boot path, timer/interrupt path, console
-path, core threading/synchronization primitives, and the ARM1176 runtime MMU
-mapping path on real hardware. ARM1176 short-descriptor DFSR/IFSR decoding has
-now also been taught the relevant second-level translation and permission fault
-codes, so MMU test failures now report named ARM faults instead of raw
+These results validate the working boot path, console path, timer/interrupt
+path, sleeps, timer APIs, delayed work, preemption, pipe concurrency, core
+threading/synchronization primitives, mutex priority inheritance, fatal and
+exception handling, and the ARM1176 runtime MMU mapping path on real hardware.
+ARM1176 short-descriptor DFSR/IFSR decoding has now also been taught the
+relevant second-level translation and permission fault codes, so MMU test
+failures now report named ARM faults instead of raw
 ``Unknown (...)`` status numbers.
 
 Key Debugging Notes
@@ -568,9 +662,12 @@ Observed result with the sequence above:
 What Is Not Verified Yet
 ************************
 
-- ARMCTRL interrupt handling on hardware beyond the currently validated
-  timer, mini-UART RX, and BCM2835 GPIO button-interrupt cases
-- Exception entry and return behavior on hardware
+- ARMCTRL interrupt handling on hardware beyond the currently validated timer,
+  mini-UART RX, and BCM2835 GPIO button-interrupt cases
+- Dedicated synthetic interrupt-controller tests such as
+  ``tests/arch/common/interrupt``.  That test currently does not build for
+  this port because the ARM1176/BCM2835 path does not provide the test's
+  ``trigger_irq()`` hook.
 
 Open Risks
 **********
@@ -579,10 +676,16 @@ Open Risks
   ``cortex_a_r`` path for ARM1176.
 - The current reset/vector work is more correct than before, but it is still
   incremental adaptation rather than a dedicated ARM11 architecture path.
-- The current timer and interrupt-controller drivers are suitable for early
-  bring-up, but they have not been stress-tested or hardware-validated.
+- The current timer driver is still a simple periodic tick source, but it now
+  has meaningful real-hardware validation across monotonic cycle reads,
+  sleeps, timer APIs, delayed work, preemption, pipe concurrency, and a
+  roughly 200-second jitter/drift run.  Broader kernel validation also now
+  covers fatal exceptions, thread lifecycle behavior, and mutex priority
+  inheritance.
 - The recursive IRQ re-entry bug seen in QEMU has been fixed in the shared
-  wrapper, but that path still needs real hardware validation on ARM1176.
+  wrapper.  Real-hardware validation now covers timer IRQ delivery, mini-UART
+  RX interrupts, and BCM2835 GPIO button interrupts, but broader ARMCTRL source
+  coverage is still needed.
 - The new ``-mno-unaligned-access`` workaround fixes the observed failures, but
   it is still a workaround on top of the temporary shared ``cortex_a_r`` path
   rather than a dedicated ARM11 architecture solution.
@@ -612,8 +715,10 @@ Work in this order unless new hardware results force a change:
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.  The shared path is still the largest architectural risk.
 
-2. Expand real-hardware validation beyond the already working timer tick,
-   mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
+2. Expand real-hardware interrupt validation beyond the already working timer
+   tick, mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
+   The timer/scheduler side now has good real-hardware coverage; the remaining
+   gap is broader interrupt-source coverage and synthetic IRQ test support.
 
 3. Decide whether to continue with incremental ARM1176 support inside the
    shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under
