@@ -19,7 +19,8 @@ validation set now also includes ``tests/kernel/timer/timer_monotonic``,
 hardware.  The broader kernel validation set now also includes
 ``tests/kernel/fatal/exception``, ``tests/kernel/common``,
 ``tests/kernel/threads/thread_apis``, ``tests/kernel/mutex/mutex_api``, and
-``tests/arch/common/interrupt``.
+``tests/arch/common/interrupt``.  ``tests/kernel/context`` now also passes on
+real hardware after fixing the ARM1176 idle wait instruction.
 
 Current State
 *************
@@ -118,6 +119,11 @@ Current State
   hardware.  The run covered recursive mutexes, reentrant lock attempts with
   no-wait/timeout/forever behavior, priority inheritance, complex priority
   inversion, and timeout races during priority inversion.
+- ``tests/kernel/context`` now passes on real Raspberry Pi Zero W hardware.
+  The original failure was isolated to ``k_cpu_idle()`` returning before the
+  next 10 ms system tick; using the ARM1176 CP15 wait-for-interrupt operation
+  fixed the idle case while preserving the already-passing context,
+  interrupt-lock, sleep-ordering, yield, and thread checks.
 - The ARM1176 MMU bring-up milestone is now complete for bare-metal kernel-space
   use.  ``CONFIG_USERSPACE`` and per-thread address-space management are the next
   major MMU topic but are deferred as a separate project.
@@ -183,6 +189,10 @@ The following pieces now exist in-tree:
   ``barrier_isync_fence_full()`` instead of the CMSIS ``__DSB()``/``__ISB()``
   calls, which were the remaining source of ``dsb 0xF``/``isb 0xF`` assembler
   errors on the ARM1176 target.
+- ``cortex_a_r/cpu_idle.c`` now also uses the ARM1176 CP15
+  wait-for-interrupt operation (``MCR p15, 0, r0, c7, c0, 4``) instead of the
+  generic ``__WFI()`` path.  This fixed ``tests/kernel/context``
+  ``test_cpu_idle`` on QEMU ``raspi0`` and real Raspberry Pi Zero W hardware.
 - ``arch/arm/core/mmu/arm_mmu.c`` ARM1176 cache init sequence improved
   following analysis of Linux ``arch/arm/mm/proc-v6.S __v6_setup``:
 
@@ -431,6 +441,11 @@ Representative results:
   ARMCTRL can hardware-pend arbitrary GPU IRQ lines or provide hardware
   priority preemption.  The ``test_prevent_interruption`` case still exercises
   the real hardware timer interrupt path under ``irq_lock()`` / unlock.
+- ``tests/kernel/context``: PASS on hardware.  The run passes context/current
+  thread checks, interrupt lock/unlock coverage, CPU idle, busy wait,
+  ordered sleep wakeups, yield, and basic thread behavior.  The
+  ``test_cpu_idle_atomic`` and ``test_timer_interrupts`` cases skip on the
+  current ARM/single-CPU configuration.
 - ``samples/basic/atomic_set``: PASS on hardware as a development-only
   ARM1176 exclusive-access probe. It directly exercises ``LDREX``/``STREX`` on
   permanent writable image RAM, permanent page-aligned writable RAM, and
@@ -441,8 +456,8 @@ Representative results:
 These results validate the working boot path, console path, timer/interrupt
 path, sleeps, timer APIs, delayed work, preemption, pipe concurrency, core
 threading/synchronization primitives, mutex priority inheritance, fatal and
-exception handling, common interrupt-test control flow, and the ARM1176 runtime
-MMU mapping path on real hardware.
+exception handling, context/idle behavior, common interrupt-test control flow,
+and the ARM1176 runtime MMU mapping path on real hardware.
 ARM1176 short-descriptor DFSR/IFSR decoding has now also been taught the
 relevant second-level translation and permission fault codes, so MMU test
 failures now report named ARM faults instead of raw

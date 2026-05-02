@@ -32,6 +32,7 @@ The following have been run on real Raspberry Pi Zero W hardware:
 - ``tests/kernel/threads/thread_apis``
 - ``tests/kernel/mutex/mutex_api``
 - ``tests/arch/common/interrupt``
+- ``tests/kernel/context``
 
 Notes:
 
@@ -54,6 +55,9 @@ Notes:
   table dispatch, similar to the existing RX test hook, not an ARMCTRL
   hardware-pended GPU interrupt.  The timer-backed interrupt lock case uses
   the real hardware timer IRQ path.
+- ``tests/kernel/context`` passes on real hardware after the ARM1176 idle path
+  was changed to use the CP15 wait-for-interrupt operation instead of the
+  ARMv7-style ``WFI`` instruction.
 
 Build A Sample
 **************
