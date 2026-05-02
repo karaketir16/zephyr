@@ -18,7 +18,8 @@ validation set now also includes ``tests/kernel/timer/timer_monotonic``,
 ``tests/kernel/sched/preempt``, and ``tests/kernel/pipe/pipe_api`` on real
 hardware.  The broader kernel validation set now also includes
 ``tests/kernel/fatal/exception``, ``tests/kernel/common``,
-``tests/kernel/threads/thread_apis``, and ``tests/kernel/mutex/mutex_api``.
+``tests/kernel/threads/thread_apis``, ``tests/kernel/mutex/mutex_api``, and
+``tests/arch/common/interrupt``.
 
 Current State
 *************
@@ -421,6 +422,15 @@ Representative results:
   iteration, and essential-thread fatal paths.
 - ``tests/kernel/mutex/mutex_api``: PASS on hardware.  All 9 mutex API tests
   pass, including priority inheritance and priority-inversion timeout races.
+- ``tests/arch/common/interrupt``: PASS on hardware.  The run passes all 6
+  ``interrupt_feature`` checks.  The BCM2835 ``trigger_irq()`` hook used by
+  the dynamic interrupt and nested-ISR cases dispatches through Zephyr's SW ISR
+  table, following the same broad test-helper style as the existing RX direct
+  dispatch path.  This validates ISR table connection, enable-state handling,
+  offload behavior, and nested ISR control flow; it does not claim that
+  ARMCTRL can hardware-pend arbitrary GPU IRQ lines or provide hardware
+  priority preemption.  The ``test_prevent_interruption`` case still exercises
+  the real hardware timer interrupt path under ``irq_lock()`` / unlock.
 - ``samples/basic/atomic_set``: PASS on hardware as a development-only
   ARM1176 exclusive-access probe. It directly exercises ``LDREX``/``STREX`` on
   permanent writable image RAM, permanent page-aligned writable RAM, and
@@ -431,7 +441,8 @@ Representative results:
 These results validate the working boot path, console path, timer/interrupt
 path, sleeps, timer APIs, delayed work, preemption, pipe concurrency, core
 threading/synchronization primitives, mutex priority inheritance, fatal and
-exception handling, and the ARM1176 runtime MMU mapping path on real hardware.
+exception handling, common interrupt-test control flow, and the ARM1176 runtime
+MMU mapping path on real hardware.
 ARM1176 short-descriptor DFSR/IFSR decoding has now also been taught the
 relevant second-level translation and permission fault codes, so MMU test
 failures now report named ARM faults instead of raw
@@ -664,10 +675,10 @@ What Is Not Verified Yet
 
 - ARMCTRL interrupt handling on hardware beyond the currently validated timer,
   mini-UART RX, and BCM2835 GPIO button-interrupt cases
-- Dedicated synthetic interrupt-controller tests such as
-  ``tests/arch/common/interrupt``.  That test currently does not build for
-  this port because the ARM1176/BCM2835 path does not provide the test's
-  ``trigger_irq()`` hook.
+- Hardware-pended software triggering for arbitrary BCM2835 ARMCTRL GPU IRQ
+  lines.  ``tests/arch/common/interrupt`` now passes, but its BCM2835
+  ``trigger_irq()`` helper is an SW ISR table dispatch used for test control
+  flow, not an ARMCTRL pending-bit mechanism.
 
 Open Risks
 **********
@@ -718,7 +729,8 @@ Work in this order unless new hardware results force a change:
 2. Expand real-hardware interrupt validation beyond the already working timer
    tick, mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
    The timer/scheduler side now has good real-hardware coverage; the remaining
-   gap is broader interrupt-source coverage and synthetic IRQ test support.
+   gap is broader interrupt-source coverage beyond the synthetic
+   ``tests/arch/common/interrupt`` trigger path.
 
 3. Decide whether to continue with incremental ARM1176 support inside the
    shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under

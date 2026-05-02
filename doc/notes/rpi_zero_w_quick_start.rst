@@ -31,6 +31,7 @@ The following have been run on real Raspberry Pi Zero W hardware:
 - ``tests/kernel/common``
 - ``tests/kernel/threads/thread_apis``
 - ``tests/kernel/mutex/mutex_api``
+- ``tests/arch/common/interrupt``
 
 Notes:
 
@@ -48,6 +49,11 @@ Notes:
 - The broader kernel validation set now also covers fatal exceptions, common
   kernel helpers, thread lifecycle APIs, and mutex priority-inheritance paths
   on real hardware.
+- ``tests/arch/common/interrupt`` passes on real hardware.  The BCM2835
+  ``trigger_irq()`` support used by the dynamic/nested cases is a software ISR
+  table dispatch, similar to the existing RX test hook, not an ARMCTRL
+  hardware-pended GPU interrupt.  The timer-backed interrupt lock case uses
+  the real hardware timer IRQ path.
 
 Build A Sample
 **************
