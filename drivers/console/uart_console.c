@@ -601,6 +601,7 @@ static int uart_console_init(void)
 	}
 
 	uart_console_hook_install();
+	printk("[uart-console] hook installed on %s\n", uart_console_dev->name);
 
 	return 0;
 }

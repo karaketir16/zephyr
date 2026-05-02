@@ -59,6 +59,14 @@ static struct arm_mmu_l2_page_table_status
 static uint32_t arm_mmu_l2_tables_free = CONFIG_ARM_MMU_NUM_L2_TABLES;
 static uint32_t arm_mmu_l2_next_free_table;
 
+#if defined(CONFIG_ARMV6_ARM1176)
+#define Z_ARM1176_RUNTIME_NORMAL_MEM_SHARE_ATTR 0
+#define Z_ARM1176_STATIC_DATA_MEM_SHARE_ATTR    0
+#else
+#define Z_ARM1176_RUNTIME_NORMAL_MEM_SHARE_ATTR MATTR_SHARED
+#define Z_ARM1176_STATIC_DATA_MEM_SHARE_ATTR    MATTR_SHARED
+#endif
+
 /*
  * Static definition of all code & data memory regions of the
  * current Zephyr image. This information must be available &
@@ -88,7 +96,7 @@ static const struct arm_mmu_flat_range mmu_zephyr_ranges[] = {
 	{ .name  = "zephyr_data",
 	  .start = (uint32_t)_image_ram_start,
 	  .end   = (uint32_t)_image_ram_end,
-	  .attrs = MT_NORMAL | MATTR_SHARED |
+	  .attrs = MT_NORMAL | Z_ARM1176_STATIC_DATA_MEM_SHARE_ATTR |
 		   MPERM_R | MPERM_W |
 		   MATTR_CACHE_OUTER_WB_WA | MATTR_CACHE_INNER_WB_WA},
 
@@ -128,6 +136,23 @@ static const struct arm_mmu_flat_range mmu_zephyr_ranges[] = {
 
 static void arm_mmu_l2_map_page(uint32_t va, uint32_t pa,
 				struct arm_mmu_perms_attrs perms_attrs);
+static void invalidate_tlb_all(void);
+static struct arm_mmu_perms_attrs arm_mmu_convert_attr_flags(uint32_t attrs);
+
+#ifdef CONFIG_ARMV6_ARM1176
+static void z_arm1176_sync_page_table_updates(void)
+{
+	/*
+	 * After remapping zephyr_data as normal cached non-shareable memory, the
+	 * page tables themselves also live in cached RAM. Push descriptor writes
+	 * out before invalidating the TLB so the ARM1176 page-table walker sees
+	 * the updated entries.
+	 */
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 0" : : "r"(0) : "memory");
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
+	barrier_isync_fence_full();
+}
+#endif
 
 /**
  * @brief Invalidates the TLB
@@ -954,7 +979,7 @@ static int __arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flag
 		break;
 	case K_MEM_CACHE_WB:
 		conv_flags |= MT_NORMAL;
-		conv_flags |= MATTR_SHARED;
+		conv_flags |= Z_ARM1176_RUNTIME_NORMAL_MEM_SHARE_ATTR;
 		if (flags & K_MEM_PERM_RW) {
 			conv_flags |= MATTR_CACHE_OUTER_WB_WA;
 			conv_flags |= MATTR_CACHE_INNER_WB_WA;
@@ -965,7 +990,7 @@ static int __arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flag
 		break;
 	case K_MEM_CACHE_WT:
 		conv_flags |= MT_NORMAL;
-		conv_flags |= MATTR_SHARED;
+		conv_flags |= Z_ARM1176_RUNTIME_NORMAL_MEM_SHARE_ATTR;
 		conv_flags |= MATTR_CACHE_OUTER_WT_nWA;
 		conv_flags |= MATTR_CACHE_INNER_WT_nWA;
 		break;
@@ -1016,6 +1041,9 @@ void arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flags)
 		LOG_ERR("__arch_mem_map() returned %d", ret);
 		k_panic();
 	} else {
+#ifdef CONFIG_ARMV6_ARM1176
+		z_arm1176_sync_page_table_updates();
+#endif
 		invalidate_tlb_all();
 	}
 }
@@ -1075,6 +1103,9 @@ void arch_mem_unmap(void *addr, size_t size)
 	if (ret) {
 		LOG_ERR("__arch_mem_unmap() returned %d", ret);
 	} else {
+#ifdef CONFIG_ARMV6_ARM1176
+		z_arm1176_sync_page_table_updates();
+#endif
 		invalidate_tlb_all();
 	}
 }

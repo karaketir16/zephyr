@@ -154,7 +154,8 @@ static int uart_bcm2711_init(const struct device *dev)
 		return err;
 	}
 
-	bcm2711_mu_lowlevel_init(uart_data->uart_addr, 1, uart_cfg->baud_rate, uart_cfg->clocks);
+	bcm2711_mu_lowlevel_init(uart_data->uart_addr, false, uart_cfg->baud_rate,
+				 uart_cfg->clocks);
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	uart_cfg->irq_config_func(dev);

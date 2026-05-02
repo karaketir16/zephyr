@@ -538,6 +538,7 @@ __boot_func
 FUNC_NO_STACK_PROTECTOR
 FUNC_NORETURN void z_cstart(void)
 {
+	printk("Initializing kernel...\n");
 	/* gcov hook needed to get the coverage report.*/
 	gcov_static_init();
 

@@ -1,0 +1,12 @@
+sample:
+  name: Atomic Set Sample
+tests:
+  sample.basic.atomic_set:
+    tags:
+      - kernel
+      - atomic
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "atomic_set old=1 new=42 current=42"
