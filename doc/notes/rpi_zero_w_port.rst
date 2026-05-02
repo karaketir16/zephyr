@@ -113,10 +113,6 @@ The following pieces now exist in-tree:
   when ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER`` is in use.
 - ARM1176 BCM2835 builds now force ``-mno-unaligned-access`` to match the
   currently working execution model on this temporary shared architecture path.
-- ARM1176 BCM2835 builds without MMU support now use
-  ``CONFIG_ATOMIC_OPERATIONS_C`` so the current bring-up no longer depends on
-  ``LDREX/STREX`` in a no-MMU execution model where exclusive accesses are not
-  yet safe.
 - ARM1176-specific barrier implementations added to
   ``include/zephyr/arch/arm/barrier.h``:
   ``ISB``/``DSB``/``DMB`` mnemonics are ARMv7-only and are rejected by the
@@ -165,6 +161,16 @@ The following pieces now exist in-tree:
     ``L1C_*`` functions.  ``L1C_InvalidateICacheAll()`` was also unsafe because
     it calls ``__DSB()``/``__ISB()`` internally, emitting the ARMv7-only
     mnemonics.
+- ARM1176 MMU attribute and runtime update policy for builtin atomics:
+
+  - the static ``zephyr_data`` mapping is created as normal cacheable
+    non-shareable RAM on ``CONFIG_ARMV6_ARM1176``
+  - runtime-created normal WB/WT RAM mappings are also kept non-shareable on
+    ARM1176
+  - runtime page-table descriptor writes are cleaned out before TLB
+    invalidation in ``z_arm1176_sync_page_table_updates()``
+  - this combination is what made ARM1176 exclusive accesses work correctly on
+    permanent writable RAM and runtime mappings on real hardware
 
 Important Behavioral Changes
 ****************************
@@ -323,6 +329,12 @@ Representative results:
   ``test_k_mem_map_exhaustion`` completes, the guard-page tests fault as
   expected, and ``test_k_mem_map_user`` auto-skips because
   ``CONFIG_USERSPACE`` is not enabled.
+- ``samples/basic/atomic_set``: PASS on hardware as a development-only
+  ARM1176 exclusive-access probe. It directly exercises ``LDREX``/``STREX`` on
+  permanent writable image RAM, permanent page-aligned writable RAM, and
+  anonymous runtime mappings. This sample is diagnostic scaffolding, not a
+  normal board-validation sample, and it is independent of whichever Zephyr
+  atomic backend is selected for the build.
 
 These results validate the working boot path, timer/interrupt path, console
 path, core threading/synchronization primitives, and the ARM1176 runtime MMU
@@ -348,6 +360,11 @@ The main bring-up problems and their fixes were:
   register, which does not exist on ARM1176, and the CMSIS helpers also rely
   on ARMv7-only ``dsb``/``isb`` mnemonics. The ARM1176 path was fixed by using
   direct MCR-based cache and barrier operations.
+- Earlier builtin atomic failures on ARM1176 were caused by the permanent
+  writable image RAM mapping and runtime page-table visibility rules, not by
+  broken ``LDREX``/``STREX`` instructions. The working fix was to map
+  permanent and runtime normal RAM as non-shareable on ARM1176 and to clean
+  runtime page-table updates before TLB invalidation.
 - The earlier ``mem_map_api`` corruption was caused by page-frame accounting,
   not by ``memset()`` or by runtime PTE programming. The boot-mapped vector
   page at ``0x8000`` sat outside ``z_mapped_start..z_mapped_end``, so the
@@ -427,12 +444,22 @@ Important:
   the board from that adapter.
 - Normal USB power into the Pi is the safer default.
 
-Expected first successful output:
+Representative successful output:
 
 .. code-block:: text
 
+   [early-console] raw mini-UART ready
+   Initializing kernel...
+   [uart-console] hook installed on uart@20215040
    *** Booting Zephyr OS build ...
    Hello World! rpi_zero_w/bcm2835
+
+Notes:
+
+- The extra early-console and console-hook lines above reflect the current
+  debug-enabled branch state and may be removed during cleanup.
+- The important success signal is that Zephyr reaches the normal boot banner
+  and then prints ``Hello World! rpi_zero_w/bcm2835``.
 
 JTAG RAM Load Guide
 *******************
@@ -561,9 +588,10 @@ Open Risks
   rather than a dedicated ARM11 architecture solution.
 - The ARM1176 MMU bring-up milestone is complete for bare-metal kernel-space use.
   ``arch_mem_map()`` / ``arch_mem_unmap()`` are hardware-validated, including
-  XN enforcement.  The atomic backend remains intentionally conservative
-  (``CONFIG_ATOMIC_OPERATIONS_C``) and can be revisited after the
-  ``cortex_a_r`` shared-path risk is resolved.
+  XN enforcement, and builtin ARM1176 atomics are also now hardware-validated
+  under the MMU. The remaining risk is in the temporary shared
+  ``cortex_a_r`` execution path itself, not in the exclusive-access MMU
+  policy that the current port uses.
 - ``CONFIG_USERSPACE`` is the next major MMU topic: it requires implementing
   ``arch_mem_domain_*``, USR mode entry/exit, and SVC syscall dispatch.  None
   of these exist yet for the ARM1176 path.  Userspace is deferred as a
@@ -584,18 +612,14 @@ Work in this order unless new hardware results force a change:
    ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
    behavior.  The shared path is still the largest architectural risk.
 
-2. Revisit the atomic backend: now that the MMU path is stable, evaluate
-   whether ``CONFIG_ATOMIC_OPERATIONS_C`` can be replaced with real
-   ``LDREX``/``STREX`` exclusive accesses under the MMU.
-
-3. Expand real-hardware validation beyond the already working timer tick,
+2. Expand real-hardware validation beyond the already working timer tick,
    mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
 
-4. Decide whether to continue with incremental ARM1176 support inside the
+3. Decide whether to continue with incremental ARM1176 support inside the
    shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under
    ``arch/arm``.  The current scaffolding is a known temporary shortcut.
 
-5. Once core ARM1176 execution and interrupt behavior are less risky,
+4. Once core ARM1176 execution and interrupt behavior are less risky,
    follow-up work can expand into:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
@@ -604,7 +628,7 @@ Work in this order unless new hardware results force a change:
    - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
 
-6. ``CONFIG_USERSPACE`` is a separate, large project.  Prerequisites before
+5. ``CONFIG_USERSPACE`` is a separate, large project.  Prerequisites before
    starting:
 
    - stable ARM1176 execution path (ideally a dedicated arch path, not
