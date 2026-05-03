@@ -14,6 +14,7 @@
 #include <zephyr/sys_clock.h>
 #include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
 
 #define BCM2835_STIMER_BASE	DT_INST_REG_ADDR(0)
 #define BCM2835_STIMER_IRQN	DT_INST_IRQN(0)
@@ -25,6 +26,7 @@
 #define BCM2835_STIMER_C2	(BCM2835_STIMER_BASE + 0x14)
 #define BCM2835_STIMER_C3	(BCM2835_STIMER_BASE + 0x18)
 #define BCM2835_STIMER_MATCH3	BIT(3)
+#define BCM2835_STIMER_MIN_DELAY_CYCLES 2U
 
 #if defined(CONFIG_TEST)
 const int32_t z_sys_timer_irq_for_test = BCM2835_STIMER_IRQN;
@@ -33,6 +35,25 @@ const int32_t z_sys_timer_irq_for_test = BCM2835_STIMER_IRQN;
 static struct k_spinlock lock;
 static uint32_t cycles_per_tick;
 static uint32_t last_cycle;
+static uint32_t last_tick;
+static uint32_t last_elapsed;
+
+static inline uint32_t max_programmable_ticks(void)
+{
+	return (UINT32_MAX / 2U) / cycles_per_tick;
+}
+
+static void bcm2835_program_compare(uint32_t next_cycle)
+{
+	uint32_t now = sys_read32(BCM2835_STIMER_CLO);
+
+	if ((int32_t)(next_cycle - now) < (int32_t)BCM2835_STIMER_MIN_DELAY_CYCLES) {
+		next_cycle = now + BCM2835_STIMER_MIN_DELAY_CYCLES;
+	}
+
+	sys_write32(next_cycle, BCM2835_STIMER_C3);
+}
+
 static void bcm2835_system_timer_isr(const void *arg)
 {
 	ARG_UNUSED(arg);
@@ -48,11 +69,18 @@ static void bcm2835_system_timer_isr(const void *arg)
 	delta_cycles = now - last_cycle;
 	delta_ticks = delta_cycles / cycles_per_tick;
 	if (delta_ticks == 0U) {
-		delta_ticks = 1U;
+		bcm2835_program_compare(last_cycle + cycles_per_tick);
+		k_spin_unlock(&lock, key);
+		return;
 	}
 
 	last_cycle += delta_ticks * cycles_per_tick;
-	sys_write32(last_cycle + cycles_per_tick, BCM2835_STIMER_C3);
+	last_tick += delta_ticks;
+	last_elapsed = 0U;
+
+	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
+		bcm2835_program_compare(last_cycle + cycles_per_tick);
+	}
 
 	k_spin_unlock(&lock, key);
 
@@ -61,13 +89,63 @@ static void bcm2835_system_timer_isr(const void *arg)
 
 void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
-	ARG_UNUSED(ticks);
 	ARG_UNUSED(idle);
+
+	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
+		return;
+	}
+
+	k_spinlock_key_t key;
+	uint32_t now;
+	uint32_t max_ticks;
+	uint32_t next_cycle;
+	uint32_t target_ticks;
+
+	key = k_spin_lock(&lock);
+
+	now = sys_read32(BCM2835_STIMER_CLO);
+	last_elapsed = (now - last_cycle) / cycles_per_tick;
+
+	max_ticks = max_programmable_ticks();
+	if (ticks == K_TICKS_FOREVER) {
+		ticks = max_ticks;
+	} else {
+		ticks = CLAMP(ticks, 0, (int32_t)max_ticks);
+	}
+
+	target_ticks = last_tick + last_elapsed + MAX(ticks, 1);
+	next_cycle = target_ticks * cycles_per_tick;
+	if ((next_cycle - last_cycle) > (max_ticks * cycles_per_tick)) {
+		next_cycle = last_cycle + max_ticks * cycles_per_tick;
+	}
+	while ((int32_t)(next_cycle - now) < (int32_t)BCM2835_STIMER_MIN_DELAY_CYCLES) {
+		next_cycle += cycles_per_tick;
+	}
+
+	bcm2835_program_compare(next_cycle);
+
+	k_spin_unlock(&lock, key);
 }
 
 uint32_t sys_clock_elapsed(void)
 {
-	return 0U;
+	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
+		return 0U;
+	}
+
+	k_spinlock_key_t key;
+	uint32_t now;
+	uint32_t delta_ticks;
+
+	key = k_spin_lock(&lock);
+
+	now = sys_read32(BCM2835_STIMER_CLO);
+	delta_ticks = (now - last_cycle) / cycles_per_tick;
+	last_elapsed = delta_ticks;
+
+	k_spin_unlock(&lock, key);
+
+	return delta_ticks;
 }
 
 uint32_t sys_clock_cycle_get_32(void)
@@ -96,10 +174,13 @@ static int sys_clock_driver_init(void)
 {
 	cycles_per_tick = DT_INST_PROP(0, clock_frequency) / CONFIG_SYS_CLOCK_TICKS_PER_SEC;
 	last_cycle = sys_read32(BCM2835_STIMER_CLO);
+	last_tick = last_cycle / cycles_per_tick;
+	last_cycle = last_tick * cycles_per_tick;
+	last_elapsed = 0U;
 
 	IRQ_CONNECT(BCM2835_STIMER_IRQN, 0, bcm2835_system_timer_isr, NULL, 0);
 	sys_write32(BCM2835_STIMER_MATCH3, BCM2835_STIMER_CS);
-	sys_write32(last_cycle + cycles_per_tick, BCM2835_STIMER_C3);
+	bcm2835_program_compare(last_cycle + cycles_per_tick);
 	irq_enable(BCM2835_STIMER_IRQN);
 
 	return 0;
