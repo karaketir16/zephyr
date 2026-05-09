@@ -12,7 +12,13 @@ The current summary files are the source of truth for full per-test status:
   (pre-arm11-split baseline).
 - ``doc/notes/results/run-20260509-134149/summary.txt``: logging sweep.
 - ``doc/notes/results/run-20260509-200705/summary.txt``: full kernel sweep
-  on the new dedicated ``arch/arm/core/arm11/`` path (all tests pass).
+  on the dedicated ``arch/arm/core/arm11/`` path (all tests pass,
+  pre-CPU_AARCH32_ARM11 Kconfig refactor).
+- ``doc/notes/results/run-20260509-211021/summary.txt``: full kernel sweep
+  immediately after the ``CPU_AARCH32_ARM11`` Kconfig refactor; three tests
+  regressed and were fixed in the same session (see below).
+- ``doc/notes/results/run-failures-fix-3/summary.txt``: targeted rerun of the
+  three regressions after the fixes; all pass.
 
 Current State
 *************
@@ -74,6 +80,21 @@ Current State
   closes the largest open architectural risk.
 - The full kernel sweep on the new ``arm11/`` path passes on real hardware;
   see ``doc/notes/results/run-20260509-200705/summary.txt``.
+- ``CPU_ARM1176JZF_S`` now selects the new ``CPU_AARCH32_ARM11`` Kconfig
+  symbol instead of ``CPU_AARCH32_CORTEX_A``.  The ARM11 path no longer
+  inherits the Cortex-A Kconfig umbrella; ``cortex_a_r/`` shared files are
+  still compiled (they are generic enough to be safe) but are now gated on
+  ``CPU_AARCH32_ARM11`` at the CMake level.  Three regressions introduced by
+  this Kconfig change were caught and fixed in the same session:
+
+  - ``arch/Kconfig``: ``ARCH_HAS_THREAD_LOCAL_STORAGE`` was missing
+    ``CPU_AARCH32_ARM11`` — TLS was silently disabled, breaking ``errno``
+    thread-locality and cascading into a ``kernel/common`` timeout and a
+    ``threads/tls`` failure.
+  - ``tests/kernel/fatal/exception/src/main.c``: ``entry_cpu_exception_extend``
+    lacked an ``CPU_AARCH32_ARM11`` branch, falling through to integer
+    divide-by-zero which does not trap on ARM (the Cortex-A/R ``udf #0``
+    branch was not reached).
 - This is now beyond compile-only and QEMU-only bring-up, but it is still not
   a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
@@ -113,8 +134,8 @@ The following pieces now exist in-tree:
   and pull configuration.
 - ARM1176JZF-S CPU selection and ``-mcpu=arm1176jzf-s`` toolchain mapping.
 - Dedicated ARM11 execution path under ``arch/arm/core/arm11/``.  When
-  ``CONFIG_ARMV6_ARM1176`` is set the build system compiles the following
-  files from ``arm11/`` instead of the shared ``cortex_a_r/`` directory:
+  ``CONFIG_CPU_AARCH32_ARM11`` is set the build system compiles the following
+  files from ``arm11/`` in addition to the shared ``cortex_a_r/`` base:
 
   - ``reset.S`` — firmware-state normalization (clears MMU/cache/V-bit,
     forces SVC32 with IRQ/FIQ masked) without DCLS or ARMv8-R blocks.
@@ -135,7 +156,8 @@ The following pieces now exist in-tree:
     user stack setup in ``arch_new_thread`` and ``arch_user_mode_enter``.
 
   The ``cortex_a_r/`` files no longer contain ``#ifdef CONFIG_ARMV6_ARM1176``
-  guards and are back to their upstream state.
+  guards and are back to their upstream state.  The ``CPU_AARCH32_ARM11``
+  Kconfig symbol is now independent of ``CPU_AARCH32_CORTEX_A``.
 
 - ARM1176-specific barrier implementations in
   ``include/zephyr/arch/arm/barrier.h``:
@@ -264,12 +286,12 @@ Temporary Scaffolding And Stubs
 These items are still intentional scaffolding and should not be mistaken for a
 finished port:
 
-- ``CONFIG_CPU_ARM1176JZF_S`` still selects ``CPU_AARCH32_CORTEX_A``, which
-  pulls in the shared ``cortex_a_r/`` base (exc.S, irq_init, prep_c, stacks,
-  vector_table, irq_manage, smp, reboot, tcm).  The ARM1176-specific override
-  files now live in ``arch/arm/core/arm11/`` and are compiled in addition to
-  the shared base, but the Kconfig does not yet have a dedicated
-  ``CPU_AARCH32_ARM11`` symbol independent of ``CPU_AARCH32_CORTEX_A``.
+- ``CONFIG_CPU_ARM1176JZF_S`` now selects the dedicated ``CPU_AARCH32_ARM11``
+  symbol instead of ``CPU_AARCH32_CORTEX_A``.  The shared ``cortex_a_r/`` base
+  (exc.S, irq_init, prep_c, stacks, vector_table, irq_manage, smp, reboot,
+  tcm) is still compiled for ARM11 via a separate ``add_subdirectory_ifdef``
+  in ``arch/arm/core/CMakeLists.txt``; those files are generic enough to be
+  safe but have not yet been audited for hidden Cortex-A/R assumptions.
 - ``soc/brcm/bcm2835/soc.h`` only provides the minimum core-identification
   support needed for compilation.
 - ``soc/brcm/bcm2835/pinctrl_soc.h`` is a stub.
@@ -618,12 +640,12 @@ What Is Not Verified Yet
 Open Risks
 **********
 
-- ``CPU_ARM1176JZF_S`` still selects ``CPU_AARCH32_CORTEX_A`` and inherits
-  the shared ``cortex_a_r/`` base (vector table, exception entry stubs,
-  irq_manage, prep_c, stacks, reboot, tcm, smp).  Those files are not
-  ARM1176-specific, but they are still compiled through the Cortex-A/R
-  umbrella rather than a clean ``CPU_AARCH32_ARM11`` Kconfig symbol.  The
-  remaining risk is in the Kconfig lineage, not in the runtime code.
+- The shared ``cortex_a_r/`` files that ARM11 still inherits (vector table,
+  exception entry stubs, irq_manage, prep_c, stacks, reboot, tcm, smp) have
+  not been audited for hidden Cortex-A/R assumptions.  They are expected to be
+  safe on ARM1176 based on all tests passing, but a formal audit against the
+  ARM1176JZF-S TRM has not been done.  The Kconfig lineage risk (no dedicated
+  ``CPU_AARCH32_ARM11`` symbol) has been resolved.
 - The current timer driver is a simple periodic tick source with real-hardware
   validation across monotonic cycle reads, sleeps, timer APIs, delayed work,
   preemption, pipe concurrency, and a roughly 200-second jitter/drift run.
@@ -648,23 +670,18 @@ Recommended Next Steps
 
 Work in this order unless new hardware results force a change:
 
-1. Introduce a ``CPU_AARCH32_ARM11`` Kconfig symbol that is independent of
-   ``CPU_AARCH32_CORTEX_A``.  ``CPU_ARM1176JZF_S`` should select the new
-   symbol and the ``arm11/`` build path directly, rather than routing through
-   the Cortex-A umbrella.  The runtime code is already clean; this is the
-   remaining Kconfig hygiene task.
-
-2. Audit the ``cortex_a_r/`` files that ARM1176 still inherits (``exc.S``,
+1. Audit the ``cortex_a_r/`` files that ARM1176 still inherits (``exc.S``,
    ``vector_table.S``, ``irq_manage.c``, ``prep_c.c``, ``stacks.c``,
    ``reboot.c``, ``tcm.c``, ``smp.c``) for any hidden Cortex-A/R assumptions.
-   These are expected to be safe, but confirm before claiming a clean split.
+   These are expected to be safe based on the passing test sweep, but a formal
+   review against the ARM1176JZF-S TRM has not been done.
 
-3. Expand real-hardware interrupt validation beyond the already working timer
+2. Expand real-hardware interrupt validation beyond the already working timer
    tick, mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
    The remaining gap is broader ARMCTRL source coverage and a hardware-pended
    ``trigger_irq()`` for the interrupt test.
 
-4. Once the Kconfig split is clean, follow-up work can expand into:
+3. Follow-up expansion now that the Kconfig split is clean:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - broader BCM2835 GPIO coverage beyond the current minimal banks
@@ -672,9 +689,15 @@ Work in this order unless new hardware results force a change:
    - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
 
-5. Continue hardening userspace/MMU coverage:
+4. Continue hardening userspace/MMU coverage:
 
-   - decide whether ASID support is worth adding now or should wait for the
-     clean ``CPU_AARCH32_ARM11`` path
+   - decide whether ASID support is worth adding now
    - keep growing userspace regression coverage when memory-domain behavior or
      syscall entry/exit changes
+
+Previously completed steps (for reference):
+
+- *(done)* Introduced a ``CPU_AARCH32_ARM11`` Kconfig symbol independent of
+  ``CPU_AARCH32_CORTEX_A``.  ``CPU_ARM1176JZF_S`` now selects the new symbol
+  directly.  Three regressions from the refactor were caught and fixed in the
+  same session (TLS disabled, fatal/exception ARM11 branch missing).
