@@ -20,6 +20,9 @@
 #include <zephyr/sys/barrier.h>
 #include <stdbool.h>
 #include <cmsis_core.h>
+#ifdef CONFIG_ARM_AARCH32_MMU
+#include <zephyr/arch/arm/mmu/arm_mmu.h>
+#endif
 
 #if (MPU_GUARD_ALIGN_AND_SIZE_FLOAT > MPU_GUARD_ALIGN_AND_SIZE)
 #define FP_GUARD_EXTRA_SIZE	(MPU_GUARD_ALIGN_AND_SIZE_FLOAT - \
@@ -124,6 +127,11 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
 	thread->arch.priv_stack_start = 0;
 	if ((thread->base.user_options & K_USER) != 0) {
 		setup_priv_stack(thread);
+#ifdef CONFIG_ARM_AARCH32_MMU
+		z_arm_mmu_remap_user_region((void *)thread->stack_info.start,
+					    thread->stack_info.size,
+					    K_MEM_PARTITION_P_RW_U_RW);
+#endif
 		iframe = Z_STACK_PTR_TO_FRAME(struct __basic_sf, thread->arch.priv_stack_end);
 		iframe->pc = (uint32_t)arch_user_mode_enter;
 	} else {
@@ -261,6 +269,13 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
 		setup_priv_stack(_current);
 		sp_is_priv = 0;
 	}
+
+#ifdef CONFIG_ARM_AARCH32_MMU
+	z_arm_mmu_apply_mem_domain(_current->mem_domain_info.mem_domain);
+	z_arm_mmu_remap_user_region((void *)_current->stack_info.start,
+				    _current->stack_info.size,
+				    K_MEM_PARTITION_P_RW_U_RW);
+#endif
 
 	z_arm_userspace_enter(user_entry, p1, p2, p3,
 			     (uint32_t)_current->stack_info.start,

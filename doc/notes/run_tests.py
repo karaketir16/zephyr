@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime
+import fnmatch
 import glob
 from pathlib import Path
 import subprocess
@@ -52,12 +53,13 @@ def run_test(test_name, timeout, args):
             "-p",
             "always",
         ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         cwd=args.workspace_root,
+        text=True,
     )
     if build.returncode != 0:
-        return "BUILD_FAIL", 0.0, "BUILD FAILED\n"
+        return "BUILD_FAIL", 0.0, f"BUILD FAILED\n\n{build.stdout}"
 
     openocd = start_openocd(args.openocd_cfg)
     gdb = None
@@ -155,9 +157,41 @@ def parse_args():
     return args
 
 
+def split_comment(line):
+    body, sep, comment = line.partition("#")
+    return body.strip(), comment.strip() if sep else ""
+
+
 def read_test_list(test_list):
+    tests = []
+    skips = []
+    section = "tests"
+
     with test_list.open() as f:
-        return [line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")]
+        for lineno, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            body, comment = split_comment(line)
+            if not body:
+                continue
+
+            normalized = body.lower()
+            if normalized in {"[tests]", "tests:"}:
+                section = "tests"
+                continue
+            if normalized in {"[skip]", "[skips]", "skip:", "skips:"}:
+                section = "skip"
+                continue
+
+            if section == "skip":
+                reason = comment or "Skipped for this board/test run"
+                skips.append((body, reason))
+            else:
+                tests.append((body, lineno))
+
+    return tests, skips
 
 
 def parse_test_entry(line, default_timeout):
@@ -169,6 +203,19 @@ def parse_test_entry(line, default_timeout):
         return parts[0], int(parts[1])
 
     raise ValueError(f"Invalid line: {line}")
+
+
+def matches_skip(test_name, skip_pattern):
+    pattern = skip_pattern.rstrip("/")
+    name = test_name.rstrip("/")
+    return name == pattern or fnmatch.fnmatch(name, pattern)
+
+
+def skip_reason(test_name, skips):
+    for pattern, reason in skips:
+        if matches_skip(test_name, pattern):
+            return reason
+    return None
 
 
 def as_test_arg(path, workspace_root):
@@ -249,11 +296,13 @@ def main():
     result_dir.mkdir(parents=True, exist_ok=False)
     results = []
 
-    for line in read_test_list(args.test_list):
+    test_entries, skips = read_test_list(args.test_list)
+
+    for line, lineno in test_entries:
         try:
             test_name, timeout = parse_test_entry(line, args.default_timeout)
         except ValueError as err:
-            print(err)
+            print(f"{args.test_list}:{lineno}: {err}")
             continue
 
         expanded_tests = expand_test_name(test_name, args.workspace_root)
@@ -262,6 +311,13 @@ def main():
             continue
 
         for expanded_test in expanded_tests:
+            reason = skip_reason(expanded_test, skips)
+            if reason is not None:
+                print(f"[*] Skipping {expanded_test}: {reason}")
+                write_result(result_dir, expanded_test, f"SKIPPED\n\n{reason}\n")
+                results.append((expanded_test, "SKIP", 0.0))
+                continue
+
             result, runtime, output = run_test(expanded_test, timeout, args)
 
             write_result(result_dir, expanded_test, output)

@@ -50,7 +50,7 @@ SECTION_FUNC(TEXT, _isr_wrapper)
 #if defined(CONFIG_USERSPACE)
 	/* See comment below about svc stack usage */
 	cps #MODE_SVC
-	push {r0}
+	push {r0, r1}
 
 	/* Determine if interrupted thread was in user context */
 	cps #MODE_IRQ
@@ -64,14 +64,16 @@ SECTION_FUNC(TEXT, _isr_wrapper)
 
 	/* Save away user stack pointer */
 	cps #MODE_SYS
-	str sp, [r0, #_thread_offset_to_sp_usr] /* sp_usr */
+	ldr r1, =_thread_offset_to_sp_usr
+	str sp, [r0, r1] /* sp_usr */
 
 	/* Switch to privileged stack */
-	ldr sp, [r0, #_thread_offset_to_priv_stack_end] /* priv stack end */
+	ldr r1, =_thread_offset_to_priv_stack_end
+	ldr sp, [r0, r1] /* priv stack end */
 
 isr_system_thread:
 	cps #MODE_SVC
-	pop {r0}
+	pop {r0, r1}
 	cps #MODE_IRQ
 #endif
 

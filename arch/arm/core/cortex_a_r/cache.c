@@ -25,6 +25,26 @@
 
 static size_t dcache_line_size;
 
+#ifdef CONFIG_ARMV6_ARM1176
+static void arm1176_dcache_clean_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.9: Clean data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 1" : : "r"(addr) : "memory");
+}
+
+static void arm1176_dcache_invd_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.8: Invalidate data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c6, 1" : : "r"(addr) : "memory");
+}
+
+static void arm1176_dcache_clean_invd_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.10: Clean and invalidate data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 1" : : "r"(addr) : "memory");
+}
+#endif
+
 /**
  * @brief Get the smallest D-cache line size.
  *
@@ -128,9 +148,17 @@ int arch_dcache_flush_range(void *start_addr, size_t size)
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
+#ifdef CONFIG_ARMV6_ARM1176
+		arm1176_dcache_clean_mva((void *)addr);
+#else
 		L1C_CleanDCacheMVA((void *)addr);
+#endif
 		addr += line_size;
 	}
+
+#ifdef CONFIG_ARMV6_ARM1176
+	barrier_dmem_fence_full();
+#endif
 
 	return 0;
 }
@@ -149,7 +177,11 @@ int arch_dcache_invd_range(void *start_addr, size_t size)
 	 */
 	if (end_addr & (line_size - 1)) {
 		end_addr &= ~(line_size - 1);
+#ifdef CONFIG_ARMV6_ARM1176
+		arm1176_dcache_clean_invd_mva((void *)end_addr);
+#else
 		L1C_CleanInvalidateDCacheMVA((void *)end_addr);
+#endif
 	}
 
 	if (addr & (line_size - 1)) {
@@ -157,7 +189,11 @@ int arch_dcache_invd_range(void *start_addr, size_t size)
 		if (addr == end_addr) {
 			goto done;
 		}
+#ifdef CONFIG_ARMV6_ARM1176
+		arm1176_dcache_clean_invd_mva((void *)addr);
+#else
 		L1C_CleanInvalidateDCacheMVA((void *)addr);
+#endif
 		addr += line_size;
 	}
 
@@ -165,11 +201,19 @@ int arch_dcache_invd_range(void *start_addr, size_t size)
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
+#ifdef CONFIG_ARMV6_ARM1176
+		arm1176_dcache_invd_mva((void *)addr);
+#else
 		L1C_InvalidateDCacheMVA((void *)addr);
+#endif
 		addr += line_size;
 	}
 
 done:
+#ifdef CONFIG_ARMV6_ARM1176
+	barrier_dmem_fence_full();
+#endif
+
 	return 0;
 }
 
@@ -184,9 +228,17 @@ int arch_dcache_flush_and_invd_range(void *start_addr, size_t size)
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
+#ifdef CONFIG_ARMV6_ARM1176
+		arm1176_dcache_clean_invd_mva((void *)addr);
+#else
 		L1C_CleanInvalidateDCacheMVA((void *)addr);
+#endif
 		addr += line_size;
 	}
+
+#ifdef CONFIG_ARMV6_ARM1176
+	barrier_dmem_fence_full();
+#endif
 
 	return 0;
 }
