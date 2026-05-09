@@ -1,0 +1,12 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config SDHC_BCM2835
+	bool "BCM2835 SDHCI host controller"
+	depends on SOC_BCM2835
+	default y if DT_HAS_BRCM_BCM2835_SDHCI_ENABLED
+	select SDHC_SUPPORTS_NATIVE_MODE
+	help
+	  Enable the BCM2835 SDHCI/eMMC host controller. On Raspberry Pi
+	  Zero W this controller is wired to the on-board CYW43438 Wi-Fi
+	  device over SDIO.

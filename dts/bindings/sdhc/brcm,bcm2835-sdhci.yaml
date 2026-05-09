@@ -1,0 +1,31 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: Broadcom BCM2835 SDHCI/eMMC host controller
+
+compatible: "brcm,bcm2835-sdhci"
+
+include: [sdhc.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clock-frequency:
+    type: int
+    required: true
+    description: Input clock frequency for the controller.
+
+  bus-width:
+    type: int
+    default: 1
+    enum:
+      - 1
+      - 4
+
+  reset-gpios:
+    type: phandle-array
+    description: Optional active-low reset GPIO for a non-removable SDIO device.

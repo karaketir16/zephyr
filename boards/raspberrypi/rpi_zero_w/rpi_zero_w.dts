@@ -18,6 +18,7 @@
 
 	aliases {
 		led0 = &act_led;
+		sdhc0 = &sdhci;
 	};
 
 	chosen {
@@ -31,7 +32,7 @@
 		compatible = "gpio-leds";
 
 		act_led: led_0 {
-			gpios = <&gpio2 1 GPIO_ACTIVE_LOW>;
+			gpios = <&gpio1 19 GPIO_ACTIVE_LOW>; /* GPIO47 */
 			label = "ACT";
 		};
 	};
@@ -49,13 +50,30 @@
 			bias-pull-up;
 		};
 	};
+
+	sdhci_default: sdhci_default {
+		group1 {
+			pinmux = <BCM2835_PINMUX(34, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(35, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(36, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(37, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(38, BCM2835_ALT3)>,
+				 <BCM2835_PINMUX(39, BCM2835_ALT3)>;
+			bias-pull-up;
+		};
+
+		group2 {
+			pinmux = <BCM2835_PINMUX(43, BCM2835_ALT0)>;
+			bias-disable;
+		};
+	};
 };
 
 &system_timer {
 	status = "okay";
 };
 
-&gpio2 {
+&gpio1 {
 	status = "okay";
 };
 
@@ -63,5 +81,15 @@
 	current-speed = <115200>;
 	pinctrl-0 = <&uart1_default>;
 	pinctrl-names = "default";
+	status = "okay";
+};
+
+&sdhci {
+	bus-width = <4>;
+	max-bus-freq = <25000000>;
+	min-bus-freq = <400000>;
+	pinctrl-0 = <&sdhci_default>;
+	pinctrl-names = "default";
+	reset-gpios = <&gpio1 13 GPIO_ACTIVE_LOW>; /* GPIO41/WL_ON */
 	status = "okay";
 };

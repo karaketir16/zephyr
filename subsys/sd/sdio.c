@@ -337,7 +337,7 @@ static int sdio_read_cis(struct sdio_func *func,
 {
 	int ret;
 	char *data = func->card->card_buffer;
-	uint32_t cis_ptr = 0, num = 0;
+	uint32_t cis_ptr = 0, cis_start = 0, num = 0;
 	uint8_t tpl_code, tpl_link;
 	bool match_tpl = false;
 
@@ -351,8 +351,14 @@ static int sdio_read_cis(struct sdio_func *func,
 		}
 		cis_ptr |= *data << (i * 8);
 	}
+	cis_start = cis_ptr;
 	/* Read CIS tuples until we have read all requested CIS tuple codes */
 	do {
+		if ((cis_ptr - cis_start) > 4096U) {
+			LOG_WRN("Invalid SDIO CIS at 0x%08x: tuple chain scan limit exceeded",
+				cis_start);
+			return -EINVAL;
+		}
 		/* Read tuple code */
 		ret = sdio_io_rw_direct(func->card, SDIO_IO_READ, SDIO_FUNC_NUM_0,
 			cis_ptr++, 0, &tpl_code);
@@ -376,6 +382,11 @@ static int sdio_read_cis(struct sdio_func *func,
 		if (tpl_link == SDIO_TPL_CODE_END) {
 			/* End of tuple chain */
 			break;
+		}
+		if (tpl_link == 0) {
+			LOG_WRN("Invalid zero-length SDIO CIS tuple 0x%02x at 0x%08x",
+				tpl_code, cis_ptr - 2);
+			return -EINVAL;
 		}
 		/* Check to see if read tuple matches any we should look for */
 		for (int i = 0; i < tuple_count; i++) {

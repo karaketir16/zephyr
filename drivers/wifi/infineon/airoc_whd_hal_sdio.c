@@ -12,6 +12,9 @@
 #include <bus_protocols/whd_bus.h>
 #include <bus_protocols/whd_sdio.h>
 #include <zephyr/sd/sd.h>
+#include <zephyr/sd/sd_spec.h>
+
+#include <string.h>
 
 LOG_MODULE_DECLARE(infineon_airoc_wifi, CONFIG_WIFI_LOG_LEVEL);
 
@@ -30,6 +33,73 @@ static whd_init_config_t init_config_default = {.thread_stack_size = CY_WIFI_THR
 						.thread_priority =
 							(uint32_t)CY_WIFI_THREAD_PRIORITY,
 						.country = CY_WIFI_COUNTRY};
+
+static void airoc_wifi_sdio_func_fallback(struct sd_card *card, struct sdio_func *func,
+					  enum sdio_func_num num, uint16_t max_blk_size)
+{
+	memset(func, 0, sizeof(*func));
+	func->num = num;
+	func->card = card;
+	func->cis.max_blk_size = max_blk_size;
+	func->block_size = max_blk_size;
+}
+
+static int airoc_wifi_sdio_cmd53_byte_chunks(struct sdio_func *func,
+					     whd_bus_transfer_direction_t direction,
+					     bool increment, uint32_t address,
+					     uint8_t *buf, uint32_t len)
+{
+	uint32_t remaining = len;
+	int ret;
+
+	if ((func->card->type != CARD_SDIO) && (func->card->type != CARD_COMBO)) {
+		return -ENOTSUP;
+	}
+
+	ret = k_mutex_lock(&func->card->lock, K_MSEC(CONFIG_SD_DATA_TIMEOUT));
+	if (ret) {
+		return -EBUSY;
+	}
+
+	while (remaining > 0) {
+		uint32_t max_chunk = increment ? func->cis.max_blk_size : 512U;
+		uint32_t size = MIN(remaining, max_chunk);
+		struct sdhc_command cmd = {0};
+		struct sdhc_data data = {0};
+
+		cmd.opcode = SDIO_RW_EXTENDED;
+		cmd.arg = (func->num << SDIO_CMD_ARG_FUNC_NUM_SHIFT) |
+			  ((address & SDIO_CMD_ARG_REG_ADDR_MASK) << SDIO_CMD_ARG_REG_ADDR_SHIFT);
+		if (direction == BUS_WRITE) {
+			cmd.arg |= BIT(SDIO_CMD_ARG_RW_SHIFT);
+		}
+		if (increment) {
+			cmd.arg |= BIT(SDIO_EXTEND_CMD_ARG_OP_CODE_SHIFT);
+		}
+		cmd.arg |= (size == 512U) ? 0U : size;
+		cmd.response_type = SD_RSP_TYPE_R5 | SD_SPI_RSP_TYPE_R5;
+		cmd.timeout_ms = CONFIG_SD_CMD_TIMEOUT;
+
+		data.block_size = size;
+		data.blocks = 1;
+		data.data = buf;
+		data.timeout_ms = CONFIG_SD_DATA_TIMEOUT;
+
+		ret = sdhc_request(func->card->sdhc, &cmd, &data);
+		if (ret) {
+			break;
+		}
+
+		remaining -= size;
+		buf += size;
+		if (increment) {
+			address += size;
+		}
+	}
+
+	k_mutex_unlock(&func->card->lock);
+	return ret;
+}
 
 /******************************************************
  *                 Function
@@ -71,23 +141,43 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 	if (ret) {
 		return ret;
 	}
+	/*
+	 * The BCM2835 GPIO SDIO fallback currently supports byte-mode CMD53.
+	 * Keep WHD from selecting SDIO multiblock mode until the bit-banged
+	 * data path has full multi-block token/CRC handling.
+	 */
+	data->card.cccr_flags &= ~SDIO_SUPPORT_MULTIBLOCK;
 
+#ifdef CONFIG_CYW43438_RPI_ZERO_W
+	/*
+	 * The onboard CYW43438 has a tiny, fixed SDIO function layout and the
+	 * generic CIS parser can see stale/bogus tuple pointers after warm WHD
+	 * firmware runs. sd_init() already validated function 0; seed function
+	 * 1/2 directly from the known Broadcom layout used by the Pi firmware.
+	 */
+	airoc_wifi_sdio_func_fallback(&data->card, &data->sdio_func1,
+				      BACKPLANE_FUNCTION, SDIO_64B_BLOCK);
+	airoc_wifi_sdio_func_fallback(&data->card, &data->sdio_func2,
+				      WLAN_FUNCTION, SDIO_64B_BLOCK);
+#else
 	/* Init SDIO functions */
 	ret = sdio_init_func(&data->card, &data->card.func0, BUS_FUNCTION);
 	if (ret) {
-		LOG_ERR("sdio_enable_func BUS_FUNCTION, error: %x", ret);
-		return ret;
+		LOG_WRN("sdio_init_func BUS_FUNCTION failed, using sd_init func0: %x", ret);
 	}
 	ret = sdio_init_func(&data->card, &data->sdio_func1, BACKPLANE_FUNCTION);
 	if (ret) {
-		LOG_ERR("sdio_enable_func BACKPLANE_FUNCTION, error: %x", ret);
-		return ret;
+		LOG_WRN("sdio_init_func BACKPLANE_FUNCTION failed, using fallback: %x", ret);
+		airoc_wifi_sdio_func_fallback(&data->card, &data->sdio_func1,
+					      BACKPLANE_FUNCTION, SDIO_64B_BLOCK);
 	}
 	ret = sdio_init_func(&data->card, &data->sdio_func2, WLAN_FUNCTION);
 	if (ret) {
-		LOG_ERR("sdio_enable_func WLAN_FUNCTION, error: %x", ret);
-		return ret;
+		LOG_WRN("sdio_init_func WLAN_FUNCTION failed, using fallback: %x", ret);
+		airoc_wifi_sdio_func_fallback(&data->card, &data->sdio_func2,
+					      WLAN_FUNCTION, SDIO_64B_BLOCK);
 	}
+#endif
 	ret = sdio_set_block_size(&data->sdio_func1, SDIO_64B_BLOCK);
 	if (ret) {
 		LOG_ERR("Can't set block size for BACKPLANE_FUNCTION, error: %x", ret);
@@ -174,14 +264,14 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 	whd_result_t ret;
 	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
 	struct sdio_func *func = airoc_wifi_get_sdio_func(sd, function);
+	bool increment = (function != WLAN_FUNCTION);
 
 	if (direction == BUS_WRITE) {
 		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_write);
-		ret = sdio_write_addr(func, address, data, data_size);
 	} else {
 		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_read);
-		ret = sdio_read_addr(func, address, data, data_size);
 	}
+	ret = airoc_wifi_sdio_cmd53_byte_chunks(func, direction, increment, address, data, data_size);
 
 	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(
 		whd_driver->bus_priv, ((ret != WHD_SUCCESS) && (direction == BUS_READ)),

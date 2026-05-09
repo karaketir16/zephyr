@@ -19,6 +19,12 @@ BOARD = "rpi_zero_w"
 SERIAL_PORT = "/dev/tty.usbserial-0001"
 
 
+def kill_stale_openocd():
+    """Kill any leftover openocd process so we don't fight over port 3333."""
+    subprocess.run(["pkill", "-x", "openocd"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+
+
 def start_openocd(openocd_cfg):
     return subprocess.Popen(
         ["openocd", "-f", str(openocd_cfg)],
@@ -50,6 +56,18 @@ def parse_args():
     parser.add_argument("--gdb-cmds", type=Path, default=SCRIPT_DIR / "cmds.gdb")
     parser.add_argument("--serial-port", default=SERIAL_PORT)
     parser.add_argument("--baud", type=int, default=BAUD)
+    parser.add_argument(
+        "--log-file", type=Path, default=None,
+        help="Tee all serial output to this file in addition to stdout.",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=None,
+        help="Stop automatically after this many seconds of serial capture.",
+    )
+    parser.add_argument(
+        "--boot-timeout", type=float, default=75,
+        help="When --timeout is used, wait up to this many seconds for first serial output.",
+    )
     args = parser.parse_args()
 
     args.workspace_root = args.workspace_root.resolve()
@@ -124,7 +142,7 @@ class TerminalMode:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.original)
 
 
-def pump_serial_to_console(ser, stop_event):
+def pump_serial_to_console(ser, stop_event, log_file=None, first_output_event=None):
     while not stop_event.is_set():
         try:
             data = ser.read(4096)
@@ -138,6 +156,11 @@ def pump_serial_to_console(ser, stop_event):
 
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
+        if first_output_event is not None:
+            first_output_event.set()
+        if log_file is not None:
+            log_file.write(data)
+            log_file.flush()
 
 
 def pump_console_to_serial(ser, stop_event):
@@ -170,10 +193,17 @@ def run_sample(args):
     except ImportError as err:
         raise SystemExit("pyserial is required to run samples; install it or use the right venv.") from err
 
+    kill_stale_openocd()
+
+    log_fh = open(args.log_file, "wb") if args.log_file else None
+
+    # Open serial before starting OpenOCD/GDB so we don't miss early boot output.
+    ser = serial.Serial(args.serial_port, args.baud, timeout=0.1)
+
     openocd = start_openocd(args.openocd_cfg)
     gdb = None
-    ser = None
     stop_event = threading.Event()
+    first_output_event = threading.Event()
     serial_thread = None
 
     try:
@@ -181,22 +211,33 @@ def run_sample(args):
         gdb = start_gdb(args.gdb_cmds, args.elf_file)
         time.sleep(1)
 
-        gdb.stdin.write("run\n")
-        gdb.stdin.flush()
-
-        ser = serial.Serial(args.serial_port, args.baud, timeout=0.1)
-
-        print("[*] Serial bridge active. Press Ctrl-C to stop.")
+        msg = "[*] Serial bridge active."
+        if args.timeout:
+            msg += f" Auto-stop {args.timeout:.0f}s after first UART output."
+        else:
+            msg += " Press Ctrl-C to stop."
+        if args.log_file:
+            msg += f" Logging to {args.log_file}."
+        print(msg)
 
         serial_thread = threading.Thread(
             target=pump_serial_to_console,
-            args=(ser, stop_event),
+            args=(ser, stop_event, log_fh, first_output_event),
             daemon=True,
         )
         serial_thread.start()
 
-        with TerminalMode():
-            pump_console_to_serial(ser, stop_event)
+        gdb.stdin.write("run\n")
+        gdb.stdin.flush()
+
+        if args.timeout:
+            if first_output_event.wait(args.boot_timeout):
+                time.sleep(args.timeout)
+            else:
+                print(f"[*] No serial output after {args.boot_timeout:.0f}s; stopping.")
+        else:
+            with TerminalMode():
+                pump_console_to_serial(ser, stop_event)
 
     except KeyboardInterrupt:
         print("\n[*] Stopping sample run.")
@@ -204,8 +245,9 @@ def run_sample(args):
         stop_event.set()
         if serial_thread is not None:
             serial_thread.join(timeout=1)
-        if ser is not None:
-            ser.close()
+        if log_fh is not None:
+            log_fh.close()
+        ser.close()
         if gdb is not None:
             gdb.kill()
         openocd.kill()

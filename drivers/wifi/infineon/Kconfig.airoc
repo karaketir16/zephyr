@@ -212,6 +212,22 @@ config CYW4373_STERLING_LWB5PLUS
 	  https://www.ezurio.com/wireless-modules/wifi-modules-bluetooth/sterling-lwb5-plus-wifi-5-bluetooth-5-module
 endchoice
 
+choice CYW43438_MODULE
+	prompt "Select CYW43438 module"
+	depends on CYW43438 && !AIROC_WIFI_CUSTOM
+
+config CYW43438_AW_CU427_P
+	bool "AW-CU427-P"
+	help
+	  AzureWave AW-CU427-P module based on Infineon CYW43438.
+
+config CYW43438_RPI_ZERO_W
+	bool "Raspberry Pi Zero W"
+	help
+	  Raspberry Pi Zero W onboard CYW43438/CYW43430 Wi-Fi module.
+
+endchoice
+
 choice CYW43439_MODULE
 	prompt "Select CYW43439 module"
 	depends on CYW43439 && !AIROC_WIFI_CUSTOM

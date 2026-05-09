@@ -1,0 +1,8 @@
+sample:
+  name: Raspberry Pi Zero W SDIO probe
+tests:
+  sample.boards.raspberrypi.rpi_zero_w.sdio_probe:
+    platform_allow: rpi_zero_w/bcm2835
+    tags:
+      - sd
+      - sdio

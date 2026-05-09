@@ -179,6 +179,28 @@ if(CONFIG_CYW4343W_MURATA_1DX AND NOT CONFIG_AIROC_WIFI_CUSTOM)
   set(NVRAM_IMAGE_NAME ${hal_wifi_dir_resources}/nvram/COMPONENT_4343W/COMPONENT_MURATA-1DX/cyw94343cy8cmod.txt)
 endif()
 
+# CYW43438_AW_CU427_P clm/nvram
+if(CONFIG_CYW43438_AW_CU427_P AND NOT CONFIG_AIROC_WIFI_CUSTOM)
+  # clm
+  if(CONFIG_AIROC_WLAN_MFG_FIRMWARE)
+    set(CLM_IMAGE_NAME ${hal_blobs_dir}/clm/COMPONENT_43438/COMPONENT_AW-CU427-P/43438A1-mfgtest.clm_blob)
+  else()
+    set(CLM_IMAGE_NAME ${hal_blobs_dir}/clm/COMPONENT_43438/COMPONENT_AW-CU427-P/43438A1.clm_blob)
+  endif()
+  # nvram
+  set(NVRAM_IMAGE_NAME ${hal_wifi_dir_resources}/nvram/COMPONENT_43438/COMPONENT_AW-CU427-P/cyw943438_aw-cu427.txt)
+endif()
+
+# CYW43438_RPI_ZERO_W clm/nvram
+if(CONFIG_CYW43438_RPI_ZERO_W AND NOT CONFIG_AIROC_WIFI_CUSTOM)
+  # firmware
+  set(FW_IMAGE_NAME ${hal_blobs_dir}/firmware/COMPONENT_43438/COMPONENT_RPI-ZERO-W/brcmfmac43430-sdio.bin)
+  # clm
+  set(CLM_IMAGE_NAME ${hal_blobs_dir}/clm/COMPONENT_43438/COMPONENT_RPI-ZERO-W/empty.clm_blob)
+  # nvram
+  set(NVRAM_IMAGE_NAME ${hal_wifi_dir_resources}/nvram/COMPONENT_43438/COMPONENT_RPI-ZERO-W/brcmfmac43430-sdio.txt)
+endif()
+
 # CYW43439_MURATA_1YN clm/nvram
 if(CONFIG_CYW43439_MURATA_1YN AND NOT CONFIG_AIROC_WIFI_CUSTOM)
   # clm
