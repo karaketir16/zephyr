@@ -15,7 +15,8 @@
 
 #include <zephyr/arch/arm/exception.h>
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
 #include <zephyr/arch/cpu.h>
 #endif
 
@@ -94,7 +95,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     mov r1, ip
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     ldr ip, =_thread_offset_to_priv_stack_end
     ldr r0, [r0, ip]    /* privileged stack ptr */
 #endif
@@ -103,7 +105,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     cmp r6, #1
     beq 1f
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
     mov sp, r0
 #else
     /* set stack to privileged stack
@@ -174,7 +177,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     adds r0, r4, r5
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     add r0, r4, r5
 #endif
 
@@ -187,11 +191,13 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     mov r4, ip
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     pop {r1,r2,r3,lr}
 #endif
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
     /*
      * set stack to user stack.  We are in SYSTEM state, so r13 and r14 are
      * shared with USER state
@@ -251,7 +257,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     /* restore r0 */
     mov r0, lr
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
     /* change processor mode to unprivileged, with all interrupts enabled. */
     msr CPSR_c, #MODE_USR
 #else
@@ -297,7 +304,7 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
 #endif
     USERSPACE_DSB
     msr CONTROL, ip
-#endif /* CONFIG_CPU_AARCH32_CORTEX_R || CONFIG_CPU_AARCH32_CORTEX_A */
+#endif /* CONFIG_CPU_AARCH32_CORTEX_R || CONFIG_CPU_AARCH32_CORTEX_A || CONFIG_CPU_AARCH32_ARM11 */
 
     /* ISB is not strictly necessary here (stack pointer is not being
      * touched), but it's recommended to avoid executing pre-fetched
@@ -318,7 +325,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     pop {r0, r1}
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     ldr ip, =z_thread_entry
 #endif
     bx ip
@@ -349,7 +357,8 @@ SECTION_FUNC(TEXT, z_arm_do_syscall)
      * At this point PSPLIM is already configured to guard the default (user)
      * stack, so pushing to the default thread's stack is safe.
      */
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
     /*
      * The SVC handler has already switched to the privileged stack.
      * Store the user SP and LR at the beginning of the priv stack.
@@ -429,7 +438,8 @@ dispatch_syscall:
 
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     ldr ip, =K_SYSCALL_BAD
     cmp r6, ip
     bne valid_syscall
@@ -536,7 +546,8 @@ dispatch_syscall:
     pop {r2, r3}
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     ldr r0, =_kernel
     ldr r0, [r0, #_kernel_offset_to_current]
     ldr r1, [r0, #_thread_offset_to_mode]
@@ -608,7 +619,8 @@ z_syscall_exit_race2:
      */
     mov ip, r8
     orrs ip, ip, #1
-#elif defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#elif defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
 	/* Restore user stack pointer */
 	ldr ip, [sp,#16]
 	mov sp, ip
@@ -640,7 +652,8 @@ SECTION_FUNC(TEXT, arch_user_string_nlen)
     /* sp+4 is error value, init to -1 */
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE) \
     || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+    || defined(CONFIG_CPU_AARCH32_ARM11)
     ldr r3, =-1
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
     mov.w r3, #-1
@@ -656,7 +669,8 @@ z_arm_user_string_nlen_fault_start:
     ldrb r5, [r0, r3]
 
 z_arm_user_string_nlen_fault_end:
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
     cmp r5, #0
     beq strlen_done
 

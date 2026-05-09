@@ -1,0 +1,3 @@
+zephyr/tests/kernel/common: PASS (15.01s)
+zephyr/tests/kernel/fatal/exception: PASS (8.38s)
+zephyr/tests/kernel/threads/tls: PASS (4.27s)

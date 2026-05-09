@@ -23,7 +23,8 @@
 #include <zephyr/arch/exception.h>
 #include <cmsis_core.h>
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A) \
+	|| defined(CONFIG_CPU_AARCH32_ARM11)
 #include <zephyr/arch/arm/cortex_a_r/cpu.h>
 #endif
 

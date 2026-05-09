@@ -20,10 +20,10 @@ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE __aeabi_read_tp.S)
 zephyr_library_sources_ifdef(CONFIG_USE_SWITCH switch.S)
 
 # The files below are replaced by arch/arm/core/arm11/ when
-# CONFIG_ARMV6_ARM1176 is set.  That subdirectory is added by the parent
+# CONFIG_CPU_AARCH32_ARM11 is set.  That subdirectory is added by the parent
 # CMakeLists.txt and provides its own reset, cache, cpu_idle, fault, thread,
 # isr_wrapper, swap_helper, and exc_exit for ARM1176JZF-S.
-if(NOT CONFIG_ARMV6_ARM1176)
+if(NOT CONFIG_CPU_AARCH32_ARM11)
   zephyr_library_sources(
     reset.S
     fault.c

@@ -46,6 +46,10 @@
 #else
 #include <zephyr/arch/arm/cortex_a_r/timer.h>
 #endif
+#elif defined(CONFIG_CPU_AARCH32_ARM11)
+#include <zephyr/arch/arm/cortex_a_r/cpu.h>
+#include <zephyr/arch/arm/cortex_a_r/sys_io.h>
+#include <zephyr/arch/arm/cortex_a_r/lib_helpers.h>
 #endif
 
 #ifdef __cplusplus
