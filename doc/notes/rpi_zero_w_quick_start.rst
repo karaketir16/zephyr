@@ -7,10 +7,17 @@ bring-up in this repository.
 What Runs On Hardware
 *********************
 
-The current branch is beyond first-boot bring-up.  The broad kernel sweep is
-summarized in ``doc/notes/results/run-20260509-123546/summary.txt`` and the
-logging sweep is summarized in
-``doc/notes/results/run-20260509-134149/summary.txt``.
+The current branch is beyond first-boot bring-up.  ARM1176-specific runtime
+code now lives in the dedicated ``arch/arm/core/arm11/`` path rather than being
+guarded by ``#ifdef CONFIG_ARMV6_ARM1176`` inside the shared ``cortex_a_r/``
+files.
+
+Hardware sweep summary files:
+
+- ``doc/notes/results/run-20260509-123546/summary.txt`` — broad kernel sweep
+- ``doc/notes/results/run-20260509-134149/summary.txt`` — logging sweep
+- ``doc/notes/results/run-20260509-200705/summary.txt`` — full kernel sweep on
+  the dedicated ``arm11/`` path (83 PASS, 14 expected SKIPs, 0 failures)
 
 Working topics covered by those hardware runs include:
 
@@ -23,7 +30,8 @@ Working topics covered by those hardware runs include:
   condition variables, semaphores, mutexes, and memory slabs/heaps
 - common kernel helpers, object tracking/core APIs, device APIs, profiling
   hooks, runtime stats, and cleanup paths
-- ARM1176 cache maintenance and runtime MMU mapping
+- ARM1176 cache maintenance and runtime MMU mapping (via ``arm11/cache.c``,
+  ``arm11/cpu_idle.c``, and ``arm11/reset.S``)
 - userspace, syscalls, object validation, memory domains, memory protection,
   futexes, stack protection, stack randomization, and ``k_mem_map()``
 - logging core/API coverage, deferred/immediate/blocking logging, custom

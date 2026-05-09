@@ -56,7 +56,8 @@ GDATA(_kernel)
 	get_cpu r0
 	ldr r0, [r0, #___cpu_t_current_OFFSET]
 	cps #MODE_SYS
-	ldr sp, [r0, #_thread_offset_to_sp_usr] /* sp_usr */
+	ldr r1, =_thread_offset_to_sp_usr
+	ldr sp, [r0, r1] /* sp_usr */
 	cps #MODE_SVC
 system_thread_exit\@:
 	pop {r0-r1}

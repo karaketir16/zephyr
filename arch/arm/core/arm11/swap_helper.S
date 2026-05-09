@@ -208,7 +208,7 @@ in_fp_inactive:
 SECTION_FUNC(TEXT, z_arm_svc)
 #if defined(CONFIG_USERSPACE)
     /* Determine if incoming thread was in user context */
-    push {r0}
+    push {r0, r1}
     mrs r0, spsr
     and r0, #MODE_MASK
     cmp r0, #MODE_USR
@@ -217,16 +217,18 @@ SECTION_FUNC(TEXT, z_arm_svc)
     get_cpu r0
     ldr r0, [r0, #___cpu_t_current_OFFSET]
 
-    /* Save away user stack pointer */
-    cps #MODE_SYS
-    str sp, [r0, #_thread_offset_to_sp_usr] /* sp_usr */
+	/* Save away user stack pointer */
+	cps #MODE_SYS
+	ldr r1, =_thread_offset_to_sp_usr
+	str sp, [r0, r1] /* sp_usr */
 
-    /* Switch to privileged stack */
-    ldr sp, [r0, #_thread_offset_to_priv_stack_end] /* priv stack end */
-    cps #MODE_SVC
+	/* Switch to privileged stack */
+	ldr r1, =_thread_offset_to_priv_stack_end
+	ldr sp, [r0, r1] /* priv stack end */
+	cps #MODE_SVC
 
 svc_system_thread:
-    pop {r0}
+    pop {r0, r1}
 #endif
 
     /*

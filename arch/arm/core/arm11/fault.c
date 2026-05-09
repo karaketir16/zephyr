@@ -6,6 +6,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/*
+ * ARM1176JZF-S fault handler.
+ *
+ * DFSR/IFSR fault-status fields use the ARMv6 short-descriptor encoding.
+ */
+
 #include <zephyr/kernel.h>
 #include <zephyr/arch/exception.h>
 #include <kernel_internal.h>
@@ -47,22 +53,30 @@ static const char *get_dbgdscr_moe_string(uint32_t moe)
 
 static void dump_debug_event(void)
 {
-	/* Read and parse debug mode of entry */
 	uint32_t dbgdscr = __get_DBGDSCR();
 	uint32_t moe = (dbgdscr & DBGDSCR_MOE_Msk) >> DBGDSCR_MOE_Pos;
 
-	/* Print debug event information */
 	EXCEPTION_DUMP("Debug Event (%s)", get_dbgdscr_moe_string(moe));
 }
+
+#ifdef CONFIG_USERSPACE
+/* ARM1176 ARMv6 short-descriptor fault status codes that can be recovered from
+ * a user-mode access fault (background, translation, or permission faults).
+ */
+static bool memory_fault_recoverable_status(uint32_t fs)
+{
+	return (fs == FSR_FS_BACKGROUND_FAULT)
+		|| (fs == FSR_FS_TRANSLATION_FAULT)
+		|| (fs == FSR_FS_TRANSLATION_FAULT_2ND_LEVEL)
+		|| (fs == FSR_FS_PERMISSION_FAULT)
+		|| (fs == FSR_FS_PERMISSION_FAULT_2ND_LEVEL);
+}
+#endif
 
 static uint32_t dump_fault(uint32_t status, uint32_t addr)
 {
 	uint32_t reason = K_ERR_CPU_EXCEPTION;
-	/*
-	 * Dump fault status and, if applicable, status-specific information.
-	 * Note that the fault address is only displayed for the synchronous
-	 * faults because it is unpredictable for asynchronous faults.
-	 */
+
 	switch (status) {
 	case FSR_FS_ALIGNMENT_FAULT:
 		reason = K_ERR_ARM_ALIGNMENT_FAULT;
@@ -92,32 +106,7 @@ static uint32_t dump_fault(uint32_t status, uint32_t addr)
 		reason = K_ERR_ARM_DEBUG_EVENT;
 		dump_debug_event();
 		break;
-#if defined(CONFIG_AARCH32_ARMV8_R)
-	case FSR_FS_TRANSLATION_FAULT:
-		reason = K_ERR_ARM_TRANSLATION_FAULT;
-		EXCEPTION_DUMP("Translation Fault @ 0x%08x", addr);
-		break;
-	case FSR_FS_UNSUPPORTED_EXCLUSIVE_ACCESS_FAULT:
-		reason = K_ERR_ARM_UNSUPPORTED_EXCLUSIVE_ACCESS_FAULT;
-		EXCEPTION_DUMP("Unsupported Exclusive Access Fault @ 0x%08x", addr);
-		break;
-#elif defined(CONFIG_ARMV7_A)
-	case FSR_FS_PERMISSION_FAULT_2ND_LEVEL:
-		reason = K_ERR_ARM_PERMISSION_FAULT_2ND_LEVEL;
-		EXCEPTION_DUMP("2nd Level Permission Fault @ 0x%08x", addr);
-		break;
-	case FSR_FS_ACCESS_FLAG_FAULT_1ST_LEVEL:
-		reason = K_ERR_ARM_ACCESS_FLAG_FAULT_1ST_LEVEL;
-		EXCEPTION_DUMP("1st Level Access Flag Fault @ 0x%08x", addr);
-		break;
-	case FSR_FS_ACCESS_FLAG_FAULT_2ND_LEVEL:
-		reason = K_ERR_ARM_ACCESS_FLAG_FAULT_2ND_LEVEL;
-		EXCEPTION_DUMP("2nd Level Access Flag Fault @ 0x%08x", addr);
-		break;
-	case FSR_FS_CACHE_MAINTENANCE_INSTRUCTION_FAULT:
-		reason = K_ERR_ARM_CACHE_MAINTENANCE_INSTRUCTION_FAULT;
-		EXCEPTION_DUMP("Cache Maintenance Instruction Fault @ 0x%08x", addr);
-		break;
+	/* ARM1176 ARMv6 short-descriptor fault codes */
 	case FSR_FS_TRANSLATION_FAULT:
 		reason = K_ERR_ARM_TRANSLATION_FAULT;
 		EXCEPTION_DUMP("1st Level Translation Fault @ 0x%08x", addr);
@@ -125,6 +114,10 @@ static uint32_t dump_fault(uint32_t status, uint32_t addr)
 	case FSR_FS_TRANSLATION_FAULT_2ND_LEVEL:
 		reason = K_ERR_ARM_TRANSLATION_FAULT_2ND_LEVEL;
 		EXCEPTION_DUMP("2nd Level Translation Fault @ 0x%08x", addr);
+		break;
+	case FSR_FS_PERMISSION_FAULT_2ND_LEVEL:
+		reason = K_ERR_ARM_PERMISSION_FAULT_2ND_LEVEL;
+		EXCEPTION_DUMP("2nd Level Permission Fault @ 0x%08x", addr);
 		break;
 	case FSR_FS_DOMAIN_FAULT_1ST_LEVEL:
 		reason = K_ERR_ARM_DOMAIN_FAULT_1ST_LEVEL;
@@ -134,42 +127,16 @@ static uint32_t dump_fault(uint32_t status, uint32_t addr)
 		reason = K_ERR_ARM_DOMAIN_FAULT_2ND_LEVEL;
 		EXCEPTION_DUMP("2nd Level Domain Fault @ 0x%08x", addr);
 		break;
-	case FSR_FS_SYNC_EXTERNAL_ABORT_TRANSLATION_TABLE_1ST_LEVEL:
-		reason = K_ERR_ARM_SYNC_EXTERNAL_ABORT_TRANSLATION_TABLE_1ST_LEVEL;
-		EXCEPTION_DUMP("1st Level Synchronous External Abort Translation Table @ 0x%08x",
-				addr);
-		break;
-	case FSR_FS_SYNC_EXTERNAL_ABORT_TRANSLATION_TABLE_2ND_LEVEL:
-		reason = K_ERR_ARM_SYNC_EXTERNAL_ABORT_TRANSLATION_TABLE_2ND_LEVEL;
-		EXCEPTION_DUMP("2nd Level Synchronous External Abort Translation Table @ 0x%08x",
-				addr);
-		break;
 	case FSR_FS_TLB_CONFLICT_ABORT:
 		reason = K_ERR_ARM_TLB_CONFLICT_ABORT;
 		EXCEPTION_DUMP("TLB Conflict Abort @ 0x%08x", addr);
 		break;
-	case FSR_FS_SYNC_PARITY_ERROR_TRANSLATION_TABLE_1ST_LEVEL:
-		reason = K_ERR_ARM_SYNC_PARITY_ERROR_TRANSLATION_TABLE_1ST_LEVEL;
-		EXCEPTION_DUMP("1st Level Synchronous Parity Error Translation Table @ 0x%08x",
-				addr);
-		break;
-	case FSR_FS_SYNC_PARITY_ERROR_TRANSLATION_TABLE_2ND_LEVEL:
-		reason = K_ERR_ARM_SYNC_PARITY_ERROR_TRANSLATION_TABLE_2ND_LEVEL;
-		EXCEPTION_DUMP("2nd Level Synchronous Parity Error Translation Table @ 0x%08x",
-				addr);
-		break;
-#else
-	case FSR_FS_BACKGROUND_FAULT:
-		reason = K_ERR_ARM_BACKGROUND_FAULT;
-		EXCEPTION_DUMP("Background Fault @ 0x%08x", addr);
-		break;
-#endif
 	default:
 		EXCEPTION_DUMP("Unknown (%u)", status);
 	}
 	return reason;
 }
-#endif
+#endif /* FAULT_DUMP_VERBOSE */
 
 #if defined(CONFIG_FPU_SHARING)
 
@@ -190,21 +157,8 @@ static ALWAYS_INLINE void z_arm_fpu_caller_save(struct __fpu_sf *fpu)
 #endif
 }
 
-/**
- * @brief FPU undefined instruction fault handler
- *
- * @return Returns true if the FPU is already enabled
- *           implying a true undefined instruction
- *         Returns false if the FPU was disabled
- */
 bool z_arm_fault_undef_instruction_fp(void)
 {
-	/*
-	 * Assume this is a floating point instruction that faulted because
-	 * the FP unit was disabled.  Enable the FP unit and try again.  If
-	 * the FP was already enabled then this was an actual undefined
-	 * instruction.
-	 */
 	if (__get_FPEXC() & FPEXC_EN) {
 		return true;
 	}
@@ -212,12 +166,6 @@ bool z_arm_fault_undef_instruction_fp(void)
 	__set_FPEXC(FPEXC_EN);
 
 	if (_current_cpu->nested > 1) {
-		/*
-		 * If the nested count is greater than 1, the undefined
-		 * instruction exception came from an irq/svc context.  (The
-		 * irq/svc handler would have the nested count at 1 and then
-		 * the undef exception would increment it to 2).
-		 */
 		struct __fpu_sf *spill_esf =
 			(struct __fpu_sf *)_current_cpu->fp_ctx;
 
@@ -227,52 +175,25 @@ bool z_arm_fault_undef_instruction_fp(void)
 
 		_current_cpu->fp_ctx = NULL;
 
-		/*
-		 * If the nested count is 2 and the current thread has used the
-		 * VFP (whether or not it was actually using the VFP before the
-		 * current exception) OR if the nested count is greater than 2
-		 * and the VFP was enabled on the irq/svc entrance for the
-		 * saved exception stack frame, then save the floating point
-		 * context because it is about to be overwritten.
-		 */
 		if (((_current_cpu->nested == 2)
 				&& (_current->base.user_options & K_FP_REGS))
 			|| ((_current_cpu->nested > 2)
 				&& (spill_esf->undefined & FPEXC_EN))) {
-			/*
-			 * Spill VFP registers to specified exception stack
-			 * frame
-			 */
 			spill_esf->undefined |= FPEXC_EN;
 			spill_esf->fpscr = __get_FPSCR();
 			z_arm_fpu_caller_save(spill_esf);
 		}
 	} else {
-		/*
-		 * If the nested count is one, a thread was the faulting
-		 * context.  Just flag that this thread uses the VFP.  This
-		 * means that a thread that uses the VFP does not have to,
-		 * but should, set K_FP_REGS on thread creation.
-		 */
 		_current->base.user_options |= K_FP_REGS;
 	}
 
 	return false;
 }
-#endif
+#endif /* CONFIG_FPU_SHARING */
 
-/**
- * @brief Undefined instruction fault handler
- *
- * @return Returns true if the fault is fatal
- */
 bool z_arm_fault_undef_instruction(struct arch_esf *esf)
 {
 #if defined(CONFIG_FPU_SHARING)
-	/*
-	 * This is a true undefined instruction and we will be crashing
-	 * so save away the VFP registers.
-	 */
 	esf->fpu.undefined = __get_FPEXC();
 	esf->fpu.fpscr = __get_FPSCR();
 	z_arm_fpu_caller_save(&esf->fpu);
@@ -280,70 +201,50 @@ bool z_arm_fault_undef_instruction(struct arch_esf *esf)
 
 #if defined(CONFIG_GDBSTUB)
 	z_gdb_entry(esf, GDB_EXCEPTION_INVALID_INSTRUCTION);
-	/* Might not be fatal if GDB stub placed it in the code. */
 	return false;
 #endif
 
-	/* Print fault information */
 	EXCEPTION_DUMP("***** UNDEFINED INSTRUCTION ABORT *****");
 
 	uint32_t reason = IS_ENABLED(CONFIG_SIMPLIFIED_EXCEPTION_CODES) ?
 			  K_ERR_CPU_EXCEPTION :
 			  K_ERR_ARM_UNDEFINED_INSTRUCTION;
 
-	/* Invoke kernel fatal exception handler */
 	z_arm_fatal_error(reason, esf);
 
-	/* All undefined instructions are treated as fatal for now */
 	return true;
 }
 
-/**
- * @brief Prefetch abort fault handler
- *
- * @return Returns true if the fault is fatal
- */
 bool z_arm_fault_prefetch(struct arch_esf *esf)
 {
 	uint32_t reason = K_ERR_CPU_EXCEPTION;
 
-	/* Read and parse Instruction Fault Status Register (IFSR) */
 	uint32_t ifsr = __get_IFSR();
-#if defined(CONFIG_AARCH32_ARMV8_R)
-	uint32_t fs = ifsr & IFSR_STATUS_Msk;
-#else
+	/* ARMv6 short-descriptor: FS = FS1[10]:FS[3:0] */
 	uint32_t fs = ((ifsr & IFSR_FS1_Msk) >> 6) | (ifsr & IFSR_FS0_Msk);
-#endif
 
-	/* Read Instruction Fault Address Register (IFAR) */
 	uint32_t ifar = __get_IFAR();
 
 #if defined(CONFIG_GDBSTUB)
-	/* The BKPT instruction could have caused a software breakpoint */
 	if (fs == IFSR_DEBUG_EVENT) {
-		/* Debug event, call the gdbstub handler */
 		z_gdb_entry(esf, GDB_EXCEPTION_BREAKPOINT);
 	} else {
-		/* Fatal */
 		z_gdb_entry(esf, GDB_EXCEPTION_MEMORY_FAULT);
 	}
 	return false;
 #endif
-	/* Print fault information*/
+
 	EXCEPTION_DUMP("***** PREFETCH ABORT *****");
 	if (FAULT_DUMP_VERBOSE) {
 		reason = dump_fault(fs, ifar);
 	}
 
-	/* Simplify exception codes if requested */
 	if (IS_ENABLED(CONFIG_SIMPLIFIED_EXCEPTION_CODES) && (reason >= K_ERR_ARCH_START)) {
 		reason = K_ERR_CPU_EXCEPTION;
 	}
 
-	/* Invoke kernel fatal exception handler */
 	z_arm_fatal_error(reason, esf);
 
-	/* All prefetch aborts are treated as fatal for now */
 	return true;
 }
 
@@ -354,15 +255,9 @@ static const struct z_exc_handle exceptions[] = {
 	Z_EXC_HANDLE(z_arm_user_string_nlen)
 };
 
-/* Perform an assessment whether an MPU fault shall be
- * treated as recoverable.
- *
- * @return true if error is recoverable, otherwise return false.
- */
 static bool memory_fault_recoverable(struct arch_esf *esf)
 {
 	for (int i = 0; i < ARRAY_SIZE(exceptions); i++) {
-		/* Mask out instruction mode */
 		uint32_t start = (uint32_t)exceptions[i].start & ~0x1U;
 		uint32_t end = (uint32_t)exceptions[i].end & ~0x1U;
 
@@ -374,67 +269,45 @@ static bool memory_fault_recoverable(struct arch_esf *esf)
 
 	return false;
 }
-#endif
+#endif /* CONFIG_USERSPACE */
 
-/**
- * @brief Data abort fault handler
- *
- * @return Returns true if the fault is fatal
- */
 bool z_arm_fault_data(struct arch_esf *esf)
 {
 	uint32_t reason = K_ERR_CPU_EXCEPTION;
 
-	/* Read and parse Data Fault Status Register (DFSR) */
 	uint32_t dfsr = __get_DFSR();
-#if defined(CONFIG_AARCH32_ARMV8_R)
-	uint32_t fs = dfsr & DFSR_STATUS_Msk;
-#else
+	/* ARMv6 short-descriptor: FS = FS1[10]:FS[3:0] */
 	uint32_t fs = ((dfsr & DFSR_FS1_Msk) >> 6) | (dfsr & DFSR_FS0_Msk);
-#endif
 
-	/* Read Data Fault Address Register (DFAR) */
 	uint32_t dfar = __get_DFAR();
 
 #if defined(CONFIG_GDBSTUB)
 	z_gdb_entry(esf, GDB_EXCEPTION_MEMORY_FAULT);
-	/* return false - non-fatal error */
 	return false;
 #endif
 
 #if defined(CONFIG_USERSPACE)
-	if ((fs == COND_CODE_1(CONFIG_AARCH32_ARMV8_R,
-				(FSR_FS_TRANSLATION_FAULT),
-				(FSR_FS_BACKGROUND_FAULT)))
-			|| (fs == FSR_FS_PERMISSION_FAULT)) {
+	if (memory_fault_recoverable_status(fs)) {
 		if (memory_fault_recoverable(esf)) {
 			return false;
 		}
 	}
 #endif
 
-	/* Print fault information*/
 	EXCEPTION_DUMP("***** DATA ABORT *****");
 	if (FAULT_DUMP_VERBOSE) {
 		reason = dump_fault(fs, dfar);
 	}
 
-	/* Simplify exception codes if requested */
 	if (IS_ENABLED(CONFIG_SIMPLIFIED_EXCEPTION_CODES) && (reason >= K_ERR_ARCH_START)) {
 		reason = K_ERR_CPU_EXCEPTION;
 	}
 
-	/* Invoke kernel fatal exception handler */
 	z_arm_fatal_error(reason, esf);
 
-	/* All data aborts are treated as fatal for now */
 	return true;
 }
 
-/**
- * @brief Initialisation of fault handling
- */
 void z_arm_fault_init(void)
 {
-	/* Nothing to do for now */
 }

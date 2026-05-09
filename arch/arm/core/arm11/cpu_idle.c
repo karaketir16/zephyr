@@ -8,11 +8,23 @@
  */
 
 /*
- * ARM Cortex-A and Cortex-R power management
+ * ARM1176JZF-S power management.
+ *
+ * Uses the ARMv6 CP15 wait-for-interrupt operation instead of the
+ * ARMv7-only WFI mnemonic.
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/tracing/tracing.h>
+
+static ALWAYS_INLINE void arm1176_wait_for_interrupt(void)
+{
+	uint32_t zero = 0U;
+
+	/* ARM1176 TRM B2.2.1: CP15 WFI — wait for interrupt */
+	__asm__ volatile("mcr p15, 0, %0, c7, c0, 4" : : "r"(zero) : "memory");
+}
 
 #if defined(CONFIG_ARM_ON_EXIT_CPU_IDLE)
 #define ON_EXIT_IDLE_HOOK SOC_ON_EXIT_CPU_IDLE
@@ -25,20 +37,16 @@
 #if defined(CONFIG_ARM_ON_ENTER_CPU_IDLE_HOOK)
 #define SLEEP_IF_ALLOWED(wait_instr)                                                               \
 	do {                                                                                       \
-		/* Skip the wait instr if on_enter_cpu_idle returns false */                       \
 		if (z_arm_on_enter_cpu_idle()) {                                                   \
-			/* Wait for all memory transaction to complete */                          \
-			/* before entering low power state. */                                     \
-			__DSB();                                                                   \
+			barrier_dsync_fence_full();                                                \
 			wait_instr();                                                              \
-			/* Inline the macro provided by SoC-specific code */                       \
 			ON_EXIT_IDLE_HOOK;                                                         \
 		}                                                                                  \
 	} while (false)
 #else
 #define SLEEP_IF_ALLOWED(wait_instr)                                                               \
 	do {                                                                                       \
-		__DSB();                                                                           \
+		barrier_dsync_fence_full();                                                        \
 		wait_instr();                                                                      \
 		ON_EXIT_IDLE_HOOK;                                                                 \
 	} while (false)
@@ -51,15 +59,10 @@ void arch_cpu_idle(void)
 	sys_trace_idle();
 #endif
 
-	/* Enter low power state */
-	SLEEP_IF_ALLOWED(__WFI);
+	SLEEP_IF_ALLOWED(arm1176_wait_for_interrupt);
 
-	/*
-	 * Clear PRIMASK and flush instruction buffer to immediately service
-	 * the wake-up interrupt.
-	 */
 	__enable_irq();
-	__ISB();
+	barrier_isync_fence_full();
 }
 #endif
 
@@ -70,14 +73,8 @@ void arch_cpu_atomic_idle(unsigned int key)
 	sys_trace_idle();
 #endif
 
-	/*
-	 * Lock PRIMASK while sleeping: wfe will still get interrupted by
-	 * incoming interrupts but the CPU will not service them right away.
-	 */
 	__disable_irq();
 
-	/* No BASEPRI, call wfe directly
-	 */
 	SLEEP_IF_ALLOWED(__WFE);
 
 	if (!key) {

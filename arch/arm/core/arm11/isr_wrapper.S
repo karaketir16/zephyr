@@ -50,7 +50,7 @@ SECTION_FUNC(TEXT, _isr_wrapper)
 #if defined(CONFIG_USERSPACE)
 	/* See comment below about svc stack usage */
 	cps #MODE_SVC
-	push {r0}
+	push {r0, r1}
 
 	/* Determine if interrupted thread was in user context */
 	cps #MODE_IRQ
@@ -64,14 +64,16 @@ SECTION_FUNC(TEXT, _isr_wrapper)
 
 	/* Save away user stack pointer */
 	cps #MODE_SYS
-	str sp, [r0, #_thread_offset_to_sp_usr] /* sp_usr */
+	ldr r1, =_thread_offset_to_sp_usr
+	str sp, [r0, r1] /* sp_usr */
 
 	/* Switch to privileged stack */
-	ldr sp, [r0, #_thread_offset_to_priv_stack_end] /* priv stack end */
+	ldr r1, =_thread_offset_to_priv_stack_end
+	ldr sp, [r0, r1] /* priv stack end */
 
 isr_system_thread:
 	cps #MODE_SVC
-	pop {r0}
+	pop {r0, r1}
 	cps #MODE_IRQ
 #endif
 
@@ -193,8 +195,16 @@ _idle_state_cleared:
 	 * interrupts are handled after the active interrupt is acknowledged;
 	 * this is be done through the `get_active` interrupt controller
 	 * interface function.
+	 *
+	 * Custom SoC interrupt controllers may only report a pending source
+	 * here without performing an acknowledge/deactivate operation. For
+	 * level-triggered sources such as BCM2835 system timer and AUX UART,
+	 * re-enabling IRQs before the ISR clears the device-level pending bit
+	 * can cause immediate recursive re-entry and exception-stack overflow.
 	 */
+#if !defined(CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER)
 	cpsie i
+#endif
 
 	/*
 	 * Skip calling the isr if it is a spurious interrupt.
@@ -312,10 +322,16 @@ _idle_state_cleared:
 
 	/*
 	 * Enable and disable interrupts again to allow nested in exception handlers.
+	 * See note above: keep IRQs masked for custom interrupt controllers
+	 * whose get_active path does not acknowledge the active source.
 	 */
+#if !defined(CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER)
 	cpsie i
 	blx r3		/* call ISR */
 	cpsid i
+#else
+	blx r3		/* call ISR */
+#endif
 
 spurious_continue:
 	/* Signal end-of-interrupt */

@@ -8,8 +8,11 @@ logging, cache, MMU, and userspace paths.
 
 The current summary files are the source of truth for full per-test status:
 
-- ``doc/notes/results/run-20260509-123546/summary.txt``: broad kernel sweep.
+- ``doc/notes/results/run-20260509-123546/summary.txt``: broad kernel sweep
+  (pre-arm11-split baseline).
 - ``doc/notes/results/run-20260509-134149/summary.txt``: logging sweep.
+- ``doc/notes/results/run-20260509-200705/summary.txt``: full kernel sweep
+  on the new dedicated ``arch/arm/core/arm11/`` path (all tests pass).
 
 Current State
 *************
@@ -62,6 +65,15 @@ Current State
 - The ARM1176 MMU bring-up milestone now includes kernel mappings,
   ``k_mem_map()``, userspace entry, syscalls, memory domains, user stack
   isolation, and object validation.
+- A dedicated ``arch/arm/core/arm11/`` execution path now exists.  The
+  ARM1176-specific reset normalization, CP15 cache ops, CP15 WFI, ARMv6
+  fault decoding, ISR wrapper, exception exit, context swap, and thread setup
+  are all compiled from ``arm11/`` instead of the shared ``cortex_a_r/``
+  directory.  The ``cortex_a_r/`` files no longer carry ``#ifdef
+  CONFIG_ARMV6_ARM1176`` guards and are back to their upstream state.  This
+  closes the largest open architectural risk.
+- The full kernel sweep on the new ``arm11/`` path passes on real hardware;
+  see ``doc/notes/results/run-20260509-200705/summary.txt``.
 - This is now beyond compile-only and QEMU-only bring-up, but it is still not
   a fully hardware-validated board port yet.
 - The current path intentionally prioritizes minimal boot infrastructure over
@@ -100,34 +112,40 @@ The following pieces now exist in-tree:
 - Minimal BCM2835 pinctrl support for Pi Zero W mini-UART GPIO14/GPIO15 muxing
   and pull configuration.
 - ARM1176JZF-S CPU selection and ``-mcpu=arm1176jzf-s`` toolchain mapping.
-- ARM1176-specific compile fixes in the shared ``cortex_a_r`` path for:
+- Dedicated ARM11 execution path under ``arch/arm/core/arm11/``.  When
+  ``CONFIG_ARMV6_ARM1176`` is set the build system compiles the following
+  files from ``arm11/`` instead of the shared ``cortex_a_r/`` directory:
 
-  - barriers
-  - selected fault handling conditionals
-  - reset/vector relocation assumptions
+  - ``reset.S`` — firmware-state normalization (clears MMU/cache/V-bit,
+    forces SVC32 with IRQ/FIQ masked) without DCLS or ARMv8-R blocks.
+  - ``cache.c`` — direct CP15 MCR cache ops; no CMSIS ``L1C_*`` calls.
+  - ``cpu_idle.c`` — CP15 ``c7, c0, 4`` WFI; ``barrier_d/isync_fence_full``
+    instead of ``__DSB``/``__ISB``.
+  - ``fault.c`` — ARMv6 short-descriptor DFSR/IFSR decoding (translation,
+    permission, domain, TLB conflict fault codes) without ARMv7/ARMv8-R
+    branches.
+  - ``isr_wrapper.S`` — IRQs kept masked for custom interrupt-controller
+    paths; register-indirect loads for large ``sp_usr``/``priv_stack_end``
+    offsets.
+  - ``exc_exit.S`` — register-indirect load for ``sp_usr`` offset.
+  - ``swap_helper.S`` — register-indirect loads for ``sp_usr`` and
+    ``priv_stack_end`` offsets; ``push {r0, r1}`` instead of ``push {r0}``
+    to preserve scratch register across user-stack save.
+  - ``thread.c`` — ``z_arm_mmu_remap_user_region()`` calls for MMU-based
+    user stack setup in ``arch_new_thread`` and ``arch_user_mode_enter``.
 
-- ARM1176 reset entry cleanup in ``reset.S`` so early boot no longer assumes
-  inherited firmware state is already suitable for Zephyr.
-- ``cortex_a_r/isr_wrapper.S`` now keeps IRQs masked while dispatching ISRs
-  when ``CONFIG_ARM_CUSTOM_INTERRUPT_CONTROLLER`` is in use.
-- ARM1176 BCM2835 builds now force ``-mno-unaligned-access`` to match the
-  currently working execution model on this temporary shared architecture path.
-- ARM1176-specific barrier implementations added to
+  The ``cortex_a_r/`` files no longer contain ``#ifdef CONFIG_ARMV6_ARM1176``
+  guards and are back to their upstream state.
+
+- ARM1176-specific barrier implementations in
   ``include/zephyr/arch/arm/barrier.h``:
   ``ISB``/``DSB``/``DMB`` mnemonics are ARMv7-only and are rejected by the
-  assembler with ``-mcpu=arm1176jzf-s``.  The ARM1176 equivalents
-  (``MCR p15, 0, r0, c7, c5, 4`` / ``c7, c10, 4`` / ``c7, c10, 5``) are now
+  assembler with ``-mcpu=arm1176jzf-s``.  The ARM1176 CP15 equivalents are
   provided by overriding the ``z_barrier_*`` functions in the Zephyr-owned
   ARM barrier header so that the third-party CMSIS ``cmsis_gcc.h`` does not
   need to be modified.
-- ``cortex_a_r/cpu_idle.c`` updated to use ``barrier_dsync_fence_full()`` and
-  ``barrier_isync_fence_full()`` instead of the CMSIS ``__DSB()``/``__ISB()``
-  calls, which were the remaining source of ``dsb 0xF``/``isb 0xF`` assembler
-  errors on the ARM1176 target.
-- ``cortex_a_r/cpu_idle.c`` now also uses the ARM1176 CP15
-  wait-for-interrupt operation (``MCR p15, 0, r0, c7, c0, 4``) instead of the
-  generic ``__WFI()`` path.  This fixed ``tests/kernel/context``
-  ``test_cpu_idle`` on QEMU ``raspi0`` and real Raspberry Pi Zero W hardware.
+- ARM1176 BCM2835 builds force ``-mno-unaligned-access`` to match the
+  currently working execution model.
 - ``arch/arm/core/mmu/arm_mmu.c`` ARM1176 cache init sequence improved
   following analysis of Linux ``arch/arm/mm/proc-v6.S __v6_setup``:
 
@@ -246,11 +264,12 @@ Temporary Scaffolding And Stubs
 These items are still intentional scaffolding and should not be mistaken for a
 finished port:
 
-- ``CONFIG_CPU_ARM1176JZF_S`` currently reuses the generic
-  ``CPU_AARCH32_CORTEX_A`` path.
-- ``arch/arm/core/cortex_a_r`` is still being reused as the temporary ARM1176
-  execution path. This is a bring-up shortcut, not a claim that ARM11 is a
-  proper Cortex-A/R target.
+- ``CONFIG_CPU_ARM1176JZF_S`` still selects ``CPU_AARCH32_CORTEX_A``, which
+  pulls in the shared ``cortex_a_r/`` base (exc.S, irq_init, prep_c, stacks,
+  vector_table, irq_manage, smp, reboot, tcm).  The ARM1176-specific override
+  files now live in ``arch/arm/core/arm11/`` and are compiled in addition to
+  the shared base, but the Kconfig does not yet have a dedicated
+  ``CPU_AARCH32_ARM11`` symbol independent of ``CPU_AARCH32_CORTEX_A``.
 - ``soc/brcm/bcm2835/soc.h`` only provides the minimum core-identification
   support needed for compilation.
 - ``soc/brcm/bcm2835/pinctrl_soc.h`` is a stub.
@@ -599,55 +618,53 @@ What Is Not Verified Yet
 Open Risks
 **********
 
-- The largest technical risk is still the temporary reuse of the shared
-  ``cortex_a_r`` path for ARM1176.
-- The current reset/vector work is more correct than before, but it is still
-  incremental adaptation rather than a dedicated ARM11 architecture path.
-- The current timer driver is still a simple periodic tick source, but it now
-  has meaningful real-hardware validation across monotonic cycle reads,
-  sleeps, timer APIs, delayed work, preemption, pipe concurrency, and a
-  roughly 200-second jitter/drift run.
-- The recursive IRQ re-entry bug seen in QEMU has been fixed in the shared
-  wrapper.  Real-hardware validation now covers timer IRQ delivery, mini-UART
-  RX interrupts, and BCM2835 GPIO button interrupts, but broader ARMCTRL source
-  coverage is still needed.
-- The new ``-mno-unaligned-access`` workaround fixes the observed failures, but
-  it is still a workaround on top of the temporary shared ``cortex_a_r`` path
-  rather than a dedicated ARM11 architecture solution.
-- The ARM1176 MMU bring-up milestone now covers kernel mappings,
-  ``arch_mem_map()`` / ``arch_mem_unmap()``, XN enforcement, memory domains,
-  user stacks, SVC syscall dispatch, userspace access checks, and builtin
-  ARM1176 atomics.  Remaining risk is in the temporary shared ``cortex_a_r``
-  execution path and in the lack of ASID-based address-space switching, not in
-  the basic MMU/userspace policy proven by the current tests.
-- The current board no longer depends on firmware UART pin muxing for the
-  mini-UART console path, but BCM2835 pinctrl coverage is still far from
-  complete.
-- QEMU ``raspi0`` is now good enough to validate the current reset, timer,
-  interrupt-controller, and mini-UART boot path, but it is still not a
-  substitute for real Pi Zero W hardware validation.
+- ``CPU_ARM1176JZF_S`` still selects ``CPU_AARCH32_CORTEX_A`` and inherits
+  the shared ``cortex_a_r/`` base (vector table, exception entry stubs,
+  irq_manage, prep_c, stacks, reboot, tcm, smp).  Those files are not
+  ARM1176-specific, but they are still compiled through the Cortex-A/R
+  umbrella rather than a clean ``CPU_AARCH32_ARM11`` Kconfig symbol.  The
+  remaining risk is in the Kconfig lineage, not in the runtime code.
+- The current timer driver is a simple periodic tick source with real-hardware
+  validation across monotonic cycle reads, sleeps, timer APIs, delayed work,
+  preemption, pipe concurrency, and a roughly 200-second jitter/drift run.
+  Timeout reprogramming and tickless support are still missing.
+- Broader ARMCTRL interrupt-source validation beyond the already proven timer,
+  mini-UART RX, and BCM2835 GPIO button paths is still needed.  The
+  BCM2835 ``trigger_irq()`` in ``tests/arch/common/interrupt`` remains a
+  software ISR-table dispatch, not a hardware-pended ARMCTRL GPU IRQ.
+- ``-mno-unaligned-access`` is still required.  It is a correct match for the
+  ARM1176 execution model but is enforced at the SoC build level rather than
+  through a proper ARM11 architecture flag.
+- The ARM1176 MMU and userspace coverage now passes the full kernel sweep.
+  Remaining risk is the lack of ASID-based address-space switching, not the
+  basic MMU/userspace policy.
+- BCM2835 pinctrl coverage is still far from complete.
+- QEMU ``raspi0`` is good enough to validate the boot, timer, interrupt, and
+  mini-UART paths, but it is still not a substitute for full real-hardware
+  validation.
 
 Recommended Next Steps
 **********************
 
 Work in this order unless new hardware results force a change:
 
-1. Continue reducing ARM1176-specific assumptions inside the shared
-   ``cortex_a_r`` code, especially reset, exception entry, IRQ entry, and exit
-   behavior.  The shared path is still the largest architectural risk.
+1. Introduce a ``CPU_AARCH32_ARM11`` Kconfig symbol that is independent of
+   ``CPU_AARCH32_CORTEX_A``.  ``CPU_ARM1176JZF_S`` should select the new
+   symbol and the ``arm11/`` build path directly, rather than routing through
+   the Cortex-A umbrella.  The runtime code is already clean; this is the
+   remaining Kconfig hygiene task.
 
-2. Expand real-hardware interrupt validation beyond the already working timer
+2. Audit the ``cortex_a_r/`` files that ARM1176 still inherits (``exc.S``,
+   ``vector_table.S``, ``irq_manage.c``, ``prep_c.c``, ``stacks.c``,
+   ``reboot.c``, ``tcm.c``, ``smp.c``) for any hidden Cortex-A/R assumptions.
+   These are expected to be safe, but confirm before claiming a clean split.
+
+3. Expand real-hardware interrupt validation beyond the already working timer
    tick, mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
-   The timer/scheduler side now has good real-hardware coverage; the remaining
-   gap is broader interrupt-source coverage beyond the synthetic
-   ``tests/arch/common/interrupt`` trigger path.
+   The remaining gap is broader ARMCTRL source coverage and a hardware-pended
+   ``trigger_irq()`` for the interrupt test.
 
-3. Decide whether to continue with incremental ARM1176 support inside the
-   shared ``cortex_a_r`` path or to split out a dedicated ARM11 path under
-   ``arch/arm``.  The current scaffolding is a known temporary shortcut.
-
-4. Once core ARM1176 execution and interrupt behavior are less risky,
-   follow-up work can expand into:
+4. Once the Kconfig split is clean, follow-up work can expand into:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - broader BCM2835 GPIO coverage beyond the current minimal banks
@@ -655,11 +672,9 @@ Work in this order unless new hardware results force a change:
    - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
 
-5. Continue hardening the userspace/MMU work that now passes the kernel sweep:
+5. Continue hardening userspace/MMU coverage:
 
-   - review the full SVC and exception return paths for ARM1176-specific
-     assumptions inherited from ``cortex_a_r``
-   - decide whether ASID support is worth adding now or should wait for a
-     dedicated ARM11 architecture path
+   - decide whether ASID support is worth adding now or should wait for the
+     clean ``CPU_AARCH32_ARM11`` path
    - keep growing userspace regression coverage when memory-domain behavior or
      syscall entry/exit changes

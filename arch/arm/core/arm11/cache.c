@@ -6,31 +6,47 @@
 
 /**
  * @file
- * @brief Cortex-A/R AArch32 L1-cache maintenance operations.
+ * @brief ARM1176JZF-S L1-cache maintenance operations.
  *
- * This module implement the cache API for Cortex-A/R AArch32 cores using CMSIS.
- * Only L1-cache maintenance operations is supported.
+ * Uses direct CP15 MCR instructions per the ARM1176JZF-S TRM.  CMSIS L1C_*
+ * helpers are not used here because they rely on ARMv7-only CLIDR/DSB/ISB
+ * encodings that are not accepted by the arm1176jzf-s assembler target.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/cache.h>
-#include <cmsis_core.h>
 #include <zephyr/sys/barrier.h>
 
-/* Cache Type Register */
-#define	CTR_DMINLINE_SHIFT	16
-#define	CTR_DMINLINE_MASK	BIT_MASK(4)
+/* Cache Type Register field for DminLine */
+#define CTR_DMINLINE_SHIFT	16
+#define CTR_DMINLINE_MASK	BIT_MASK(4)
 
 #ifdef CONFIG_DCACHE
 
+/* Forward declarations for functions called before their definition. */
+int arch_dcache_invd_all(void);
+int arch_dcache_flush_and_invd_all(void);
+
 static size_t dcache_line_size;
 
-/**
- * @brief Get the smallest D-cache line size.
- *
- * Get the smallest D-cache line size of all the data and unified caches that
- * the processor controls.
- */
+static void dcache_clean_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.9: Clean data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 1" : : "r"(addr) : "memory");
+}
+
+static void dcache_invd_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.8: Invalidate data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c6, 1" : : "r"(addr) : "memory");
+}
+
+static void dcache_clean_invd_mva(void *addr)
+{
+	/* ARM1176 TRM B2.7.10: Clean and invalidate data cache entry by MVA */
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 1" : : "r"(addr) : "memory");
+}
+
 size_t arch_dcache_line_size_get(void)
 {
 	uint32_t val;
@@ -39,7 +55,6 @@ size_t arch_dcache_line_size_get(void)
 	if (!dcache_line_size) {
 		val = read_sysreg(ctr);
 		dminline = (val >> CTR_DMINLINE_SHIFT) & CTR_DMINLINE_MASK;
-		/* Log2 of the number of words */
 		dcache_line_size = 4 << dminline;
 	}
 
@@ -48,18 +63,13 @@ size_t arch_dcache_line_size_get(void)
 
 void arch_dcache_enable(void)
 {
-	uint32_t val;
+	uint32_t val = __get_SCTLR();
 
-	val = __get_SCTLR();
-
-	/* Check if cache is already enabled */
 	if (val & SCTLR_C_Msk) {
-		/* Cache already enabled - clean and invalidate to ensure coherency */
-		L1C_CleanInvalidateDCacheAll();
+		arch_dcache_flush_and_invd_all();
 		return;
 	}
 
-	/* Cache not enabled - safe to invalidate (no dirty lines) */
 	arch_dcache_invd_all();
 
 	val |= SCTLR_C_Msk;
@@ -72,7 +82,7 @@ void arch_dcache_disable(void)
 {
 	uint32_t val;
 
-	L1C_CleanInvalidateDCacheAll();
+	arch_dcache_flush_and_invd_all();
 
 	val = __get_SCTLR();
 	val &= ~SCTLR_C_Msk;
@@ -83,22 +93,25 @@ void arch_dcache_disable(void)
 
 int arch_dcache_flush_all(void)
 {
-	L1C_CleanDCacheAll();
-
+	/* ARM1176 TRM B2.7.6: Clean entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c10, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
 	return 0;
 }
 
 int arch_dcache_invd_all(void)
 {
-	L1C_InvalidateDCacheAll();
-
+	/* ARM1176 TRM B2.7.4: Invalidate entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c6, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
 	return 0;
 }
 
 int arch_dcache_flush_and_invd_all(void)
 {
-	L1C_CleanInvalidateDCacheAll();
-
+	/* ARM1176 TRM B2.7.7: Clean and invalidate entire data cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c14, 0" : : "r"(0) : "memory");
+	barrier_dsync_fence_full();
 	return 0;
 }
 
@@ -108,15 +121,15 @@ int arch_dcache_flush_range(void *start_addr, size_t size)
 	uintptr_t addr = (uintptr_t)start_addr;
 	uintptr_t end_addr = addr + size;
 
-	/* Align address to line size */
 	line_size = arch_dcache_line_size_get();
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
-		L1C_CleanDCacheMVA((void *)addr);
+		dcache_clean_mva((void *)addr);
 		addr += line_size;
 	}
 
+	barrier_dmem_fence_full();
 	return 0;
 }
 
@@ -128,13 +141,9 @@ int arch_dcache_invd_range(void *start_addr, size_t size)
 
 	line_size = arch_dcache_line_size_get();
 
-	/*
-	 * Clean and invalidate the partial cache lines at both ends of the
-	 * given range to prevent data corruption
-	 */
 	if (end_addr & (line_size - 1)) {
 		end_addr &= ~(line_size - 1);
-		L1C_CleanInvalidateDCacheMVA((void *)end_addr);
+		dcache_clean_invd_mva((void *)end_addr);
 	}
 
 	if (addr & (line_size - 1)) {
@@ -142,19 +151,19 @@ int arch_dcache_invd_range(void *start_addr, size_t size)
 		if (addr == end_addr) {
 			goto done;
 		}
-		L1C_CleanInvalidateDCacheMVA((void *)addr);
+		dcache_clean_invd_mva((void *)addr);
 		addr += line_size;
 	}
 
-	/* Align address to line size */
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
-		L1C_InvalidateDCacheMVA((void *)addr);
+		dcache_invd_mva((void *)addr);
 		addr += line_size;
 	}
 
 done:
+	barrier_dmem_fence_full();
 	return 0;
 }
 
@@ -164,36 +173,34 @@ int arch_dcache_flush_and_invd_range(void *start_addr, size_t size)
 	uintptr_t addr = (uintptr_t)start_addr;
 	uintptr_t end_addr = addr + size;
 
-	/* Align address to line size */
 	line_size = arch_dcache_line_size_get();
 	addr &= ~(line_size - 1);
 
 	while (addr < end_addr) {
-		L1C_CleanInvalidateDCacheMVA((void *)addr);
+		dcache_clean_invd_mva((void *)addr);
 		addr += line_size;
 	}
 
+	barrier_dmem_fence_full();
 	return 0;
 }
 
-#endif
+#endif /* CONFIG_DCACHE */
 
 #ifdef CONFIG_ICACHE
 
+/* Forward declaration. */
+int arch_icache_invd_all(void);
+
 void arch_icache_enable(void)
 {
-	uint32_t val;
+	uint32_t val = __get_SCTLR();
 
-	val = __get_SCTLR();
-
-	/* Check if cache is already enabled */
 	if (val & SCTLR_I_Msk) {
-		/* I-cache already enabled - invalidate to ensure coherency */
-		L1C_InvalidateICacheAll();
+		arch_icache_invd_all();
 		return;
 	}
 
-	/* Cache not enabled - invalidate before enabling */
 	arch_icache_invd_all();
 	__set_SCTLR(val | SCTLR_I_Msk);
 	barrier_isync_fence_full();
@@ -212,8 +219,9 @@ int arch_icache_flush_all(void)
 
 int arch_icache_invd_all(void)
 {
-	L1C_InvalidateICacheAll();
-
+	/* ARM1176 TRM B2.7.5: Invalidate entire I-cache */
+	__asm__ volatile("mcr p15, 0, %0, c7, c5, 0" : : "r"(0) : "memory");
+	barrier_isync_fence_full();
 	return 0;
 }
 
@@ -226,7 +234,6 @@ int arch_icache_flush_range(void *start_addr, size_t size)
 {
 	ARG_UNUSED(start_addr);
 	ARG_UNUSED(size);
-
 	return -ENOTSUP;
 }
 
@@ -234,24 +241,17 @@ int arch_icache_invd_range(void *start_addr, size_t size)
 {
 	ARG_UNUSED(start_addr);
 	ARG_UNUSED(size);
-	/* Cortex A/R do have the ICIMVAU operation to selectively invalidate
-	 * the instruction cache, but not currently supported by CMSIS.
-	 * For now, invalidate the entire cache.
-	 */
-	L1C_InvalidateICacheAll();
-
-	return 0;
+	return arch_icache_invd_all();
 }
 
 int arch_icache_flush_and_invd_range(void *start_addr, size_t size)
 {
 	ARG_UNUSED(start_addr);
 	ARG_UNUSED(size);
-
 	return -ENOTSUP;
 }
 
-#endif
+#endif /* CONFIG_ICACHE */
 
 void arch_cache_init(void)
 {
