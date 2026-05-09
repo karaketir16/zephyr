@@ -1,0 +1,6 @@
+[tests]
+zephyr/tests/subsys/logging/*
+
+[skip]
+zephyr/tests/subsys/logging/dictionary
+zephyr/tests/subsys/logging/log_disabled
