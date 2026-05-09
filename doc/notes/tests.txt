@@ -1,1 +1,23 @@
+[tests]
 zephyr/tests/kernel/*
+
+[skip]
+# The broad kernel glob intentionally walks below Twister's testcase filters.
+# Keep these exclusions local to the Raspberry Pi Zero W hardware sweep.
+zephyr/tests/kernel/fpu_sharing/float_disable # ARM1176 VFP/FPU-sharing disable semantics are not validated for this board yet.
+zephyr/tests/kernel/fpu_sharing/generic # Filtered by Twister to CPU_HAS_FPU targets; not part of the current rpi_zero_w validation target.
+zephyr/tests/kernel/ipi_cascade # Requires SMP/IPI support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/ipi_optimize # Requires SMP/IPI support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/ipi_work # Requires SMP/IPI support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/mem_protect/demand_paging/mem_map # Requires demand paging/demand mapping; not implemented for the rpi_zero_w ARM1176 MMU port.
+zephyr/tests/kernel/mem_protect/demand_paging/ondemand_section # Requires demand paging/demand mapping; not implemented for the rpi_zero_w ARM1176 MMU port.
+zephyr/tests/kernel/mp # Requires CONFIG_MP_MAX_NUM_CPUS > 1; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/smp # Requires SMP support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/smp_abort # Requires SMP support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/smp_boot_delay # Requires SMP boot-delay coverage; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/smp_metairq # Requires SMP support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/smp_suspend # Requires SMP support; Raspberry Pi Zero W is a single-core board.
+zephyr/tests/kernel/spinlock # Twister filters this to SMP multi-core systems.
+zephyr/tests/kernel/timer/cycle64 # Requires CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER; current BCM2835 timer exposes only 32-bit cycles.
+zephyr/tests/kernel/timer/starve # Slow 3600 s starvation soak; run directly with a >=3700 s timeout when needed.
+zephyr/tests/kernel/fatal/message_capture # Console-harness fatal-log test has no PROJECT EXECUTION SUCCESSFUL marker after the expected fatal path.

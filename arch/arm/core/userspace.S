@@ -15,7 +15,7 @@
 
 #include <zephyr/arch/arm/exception.h>
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
 #include <zephyr/arch/cpu.h>
 #endif
 
@@ -45,6 +45,14 @@ GDATA(_k_syscall_table)
 #else
 # define LOCK(unused)
 # define UNLOCK(unused)
+#endif
+
+#if defined(CONFIG_ARMV6_ARM1176)
+# define USERSPACE_DSB mcr p15, 0, ip, c7, c10, 4
+# define USERSPACE_ISB mcr p15, 0, ip, c7, c5, 4
+#else
+# define USERSPACE_DSB dsb
+# define USERSPACE_ISB isb
 #endif
 
 /**
@@ -85,8 +93,10 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     /* Restore p1 from ip */
     mov r1, ip
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
-    ldr r0, [r0, #_thread_offset_to_priv_stack_end]    /* privileged stack ptr */
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+    ldr ip, =_thread_offset_to_priv_stack_end
+    ldr r0, [r0, ip]    /* privileged stack ptr */
 #endif
 
     /* check if current stack is privileged and switch to it if not */
@@ -138,9 +148,11 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
      * stack, since we do not control how much stack is actually left, when
      * user invokes z_arm_userspace_enter().
      */
+#if defined(CONFIG_ARM_MPU)
     ldr r0, =_kernel
     ldr r0, [r0, #_kernel_offset_to_current]
     bl z_arm_configure_dynamic_mpu_regions
+#endif
 
     /* clear the user stack area to clean out privileged data */
     /* from right past the guard right up to the end */
@@ -161,7 +173,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
     adds r0, r4, r5
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     add r0, r4, r5
 #endif
 
@@ -173,7 +186,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     mov lr, r4
     mov r4, ip
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     pop {r1,r2,r3,lr}
 #endif
 
@@ -212,7 +226,9 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     /* Lock PendSV while reprogramming PSP and PSPLIM */
     mov r0, #_EXC_PENDSV_PRIO_MASK
     msr BASEPRI_MAX, r0
-    isb
+#if !defined(CONFIG_ARMV6_ARM1176)
+    USERSPACE_ISB
+#endif
 #endif
 
     /* Set PSPLIM to guard the thread's user stack. */
@@ -235,7 +251,7 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     /* restore r0 */
     mov r0, lr
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     /* change processor mode to unprivileged, with all interrupts enabled. */
     msr CPSR_c, #MODE_USR
 #else
@@ -279,15 +295,15 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     clrm {r3-r6}
 #endif
 #endif
-    dsb
+    USERSPACE_DSB
     msr CONTROL, ip
-#endif /* CONFIG_CPU_AARCH32_CORTEX_R */
+#endif /* CONFIG_CPU_AARCH32_CORTEX_R || CONFIG_CPU_AARCH32_CORTEX_A */
 
     /* ISB is not strictly necessary here (stack pointer is not being
      * touched), but it's recommended to avoid executing pre-fetched
      * instructions with the previous privilege.
      */
-    isb
+    USERSPACE_ISB
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
     pop {r0, r1, r2, r3}
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
@@ -301,7 +317,8 @@ SECTION_FUNC(TEXT,z_arm_userspace_enter)
     mov ip, r0
     pop {r0, r1}
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     ldr ip, =z_thread_entry
 #endif
     bx ip
@@ -332,14 +349,17 @@ SECTION_FUNC(TEXT, z_arm_do_syscall)
      * At this point PSPLIM is already configured to guard the default (user)
      * stack, so pushing to the default thread's stack is safe.
      */
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     /*
      * The SVC handler has already switched to the privileged stack.
      * Store the user SP and LR at the beginning of the priv stack.
      */
     ldr ip, =_kernel
     ldr ip, [ip, #_kernel_offset_to_current]
-    ldr ip, [ip, #_thread_offset_to_sp_usr]
+    push {r7}
+    ldr r7, =_thread_offset_to_sp_usr
+    ldr ip, [ip, r7]
+    pop {r7}
     push {ip, lr}
 #endif
 
@@ -408,7 +428,8 @@ dispatch_syscall:
     mov r0, ip
 
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     ldr ip, =K_SYSCALL_BAD
     cmp r6, ip
     bne valid_syscall
@@ -420,9 +441,9 @@ dispatch_syscall:
     b dispatch_syscall
 
 valid_syscall:
-    /* push args to complete stack frame */
-    mov ip, sp
-    push {r4,r5,ip}
+	/* push args to complete stack frame */
+	mov ip, sp
+	push {r4,r5,ip,lr}
 
 dispatch_syscall:
     ldr ip, =_k_syscall_table
@@ -433,8 +454,8 @@ dispatch_syscall:
     /* execute function from dispatch table */
     blx ip
 
-    /* restore LR */
-    ldr lr, [sp,#16]
+	/* restore LR */
+	ldr lr, [sp,#20]
 #endif
 
     LOCK(ip)
@@ -506,7 +527,7 @@ dispatch_syscall:
     orrs r1, r1, r3
     /* Store (unprivileged) mode in thread's mode state variable */
     str r1, [r0, r2]
-    dsb
+    USERSPACE_DSB
     /* drop privileges by setting bit 0 in CONTROL */
     mrs r2, CONTROL
     orrs r2, r2, r3
@@ -514,14 +535,15 @@ dispatch_syscall:
     msr CONTROL, r2
     pop {r2, r3}
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     ldr r0, =_kernel
     ldr r0, [r0, #_kernel_offset_to_current]
     ldr r1, [r0, #_thread_offset_to_mode]
     orrs r1, r1, #1
     /* Store (unprivileged) mode in thread's mode state variable */
     str r1, [r0, #_thread_offset_to_mode]
-    dsb
+    USERSPACE_DSB
 
 #if defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
     /* drop privileges by setting bit 0 in CONTROL */
@@ -542,7 +564,7 @@ z_syscall_exit_race2:
      * touched), but it's recommended to avoid executing pre-fetched
      * instructions with the previous privilege.
      */
-    isb
+    USERSPACE_ISB
     pop {r0, r1}
 
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
@@ -586,10 +608,10 @@ z_syscall_exit_race2:
      */
     mov ip, r8
     orrs ip, ip, #1
-#elif defined(CONFIG_CPU_AARCH32_CORTEX_R)
-    /* Restore user stack pointer */
-    ldr ip, [sp,#12]
-    mov sp, ip
+#elif defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
+	/* Restore user stack pointer */
+	ldr ip, [sp,#16]
+	mov sp, ip
 
     /* Zero out volatile (caller-saved) registers so as to not leak state from
      * kernel mode. The C calling convention for the syscall handler will
@@ -617,7 +639,8 @@ SECTION_FUNC(TEXT, arch_user_string_nlen)
 
     /* sp+4 is error value, init to -1 */
 #if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE) \
-    || defined(CONFIG_CPU_AARCH32_CORTEX_R)
+    || defined(CONFIG_CPU_AARCH32_CORTEX_R) \
+    || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     ldr r3, =-1
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
     mov.w r3, #-1
@@ -633,7 +656,7 @@ z_arm_user_string_nlen_fault_start:
     ldrb r5, [r0, r3]
 
 z_arm_user_string_nlen_fault_end:
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_R) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
     cmp r5, #0
     beq strlen_done
 

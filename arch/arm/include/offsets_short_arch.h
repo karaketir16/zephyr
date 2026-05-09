@@ -49,7 +49,7 @@
 #define _thread_offset_to_priv_stack_end \
 	(___thread_t_arch_OFFSET + ___thread_arch_t_priv_stack_end_OFFSET)
 
-#if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+#if defined(CONFIG_CPU_AARCH32_CORTEX_A) || defined(CONFIG_CPU_AARCH32_CORTEX_R)
 #define _thread_offset_to_sp_usr \
 	(___thread_t_arch_OFFSET + ___thread_arch_t_sp_usr_OFFSET)
 #endif

@@ -58,6 +58,9 @@ static struct arm_mmu_l2_page_table_status
 /* Available L2 tables count & next free index for an L2 table request */
 static uint32_t arm_mmu_l2_tables_free = CONFIG_ARM_MMU_NUM_L2_TABLES;
 static uint32_t arm_mmu_l2_next_free_table;
+#ifdef CONFIG_USERSPACE
+static struct k_mem_domain *active_mem_domain;
+#endif
 
 #if defined(CONFIG_ARMV6_ARM1176)
 #define Z_ARM1176_RUNTIME_NORMAL_MEM_SHARE_ATTR 0
@@ -138,6 +141,49 @@ static void arm_mmu_l2_map_page(uint32_t va, uint32_t pa,
 				struct arm_mmu_perms_attrs perms_attrs);
 static void invalidate_tlb_all(void);
 static struct arm_mmu_perms_attrs arm_mmu_convert_attr_flags(uint32_t attrs);
+static int __arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flags);
+#ifdef CONFIG_ARMV6_ARM1176
+static void z_arm1176_sync_page_table_updates(void);
+#endif
+
+#ifdef CONFIG_USERSPACE
+void arm_core_mpu_disable(void)
+{
+	__set_SCTLR(__get_SCTLR() & ~SCTLR_M_Msk);
+}
+
+void z_arm_mmu_remap_user_region(void *addr, size_t size, k_mem_partition_attr_t attr)
+{
+	uint32_t va = (uint32_t)addr;
+	uint32_t rem_size = (uint32_t)size;
+	struct arm_mmu_perms_attrs perms_attrs;
+	int key;
+
+	if (size == 0) {
+		return;
+	}
+
+	perms_attrs = arm_mmu_convert_attr_flags(attr);
+	key = arch_irq_lock();
+
+	rem_size = ROUND_UP((va & (CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE - 1)) + size,
+			    CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE);
+	va &= ~(CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE - 1);
+
+	while (rem_size > 0) {
+		arm_mmu_l2_map_page(va, va, perms_attrs);
+		rem_size -= CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE;
+		va += CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE;
+	}
+
+	arch_irq_unlock(key);
+
+#ifdef CONFIG_ARMV6_ARM1176
+	z_arm1176_sync_page_table_updates();
+#endif
+	invalidate_tlb_all();
+}
+#endif /* CONFIG_USERSPACE */
 
 #ifdef CONFIG_ARMV6_ARM1176
 static void z_arm1176_sync_page_table_updates(void)
@@ -849,6 +895,16 @@ int z_arm_mmu_init(void)
 		}
 	}
 
+#ifdef CONFIG_USERSPACE
+	z_arm_mmu_remap_user_region(__text_region_start,
+				    (size_t)(__text_region_end - __text_region_start),
+				    K_MEM_PARTITION_P_RX_U_RX);
+	z_arm_mmu_remap_user_region(__rodata_region_start,
+				    (size_t)(__rodata_region_end - __rodata_region_start),
+				    K_MEM_PARTITION_P_RO_U_RO);
+
+#endif
+
 	/* Clear TTBR1 */
 	__asm__ volatile("mcr p15, 0, %0, c2, c0, 1" : : "r"(reg_val));
 
@@ -941,6 +997,201 @@ int z_arm_mmu_init(void)
 	return 0;
 }
 
+#ifdef CONFIG_USERSPACE
+static bool arm_mmu_l1_section_user_ok(uint32_t l1_index, int write)
+{
+	union arm_mmu_l1_page_table_entry *entry = &l1_page_table.entries[l1_index];
+	bool user = ((entry->l1_section_1m.acc_perms10 >> 1) & ARM_MMU_PERMS_AP1_ENABLE_PL0) != 0;
+	bool writable = entry->l1_section_1m.acc_perms2 == 0;
+
+	return user && (!write || writable);
+}
+
+static bool arm_mmu_l2_page_user_ok(uint32_t l1_index, uint32_t l2_index, int write)
+{
+	struct arm_mmu_l2_page_table *l2_page_table;
+	union arm_mmu_l2_page_table_entry *entry;
+	bool user;
+	bool writable;
+
+	l2_page_table = (struct arm_mmu_l2_page_table *)
+		((l1_page_table.entries[l1_index].word &
+		  (ARM_MMU_PT_L2_ADDR_MASK << ARM_MMU_PT_L2_ADDR_SHIFT)));
+	entry = &l2_page_table->entries[l2_index];
+
+	if ((entry->undefined.id & ARM_MMU_PTE_ID_SMALL_PAGE) != ARM_MMU_PTE_ID_SMALL_PAGE) {
+		return false;
+	}
+
+	user = ((entry->l2_page_4k.acc_perms10 >> 1) & ARM_MMU_PERMS_AP1_ENABLE_PL0) != 0;
+	writable = entry->l2_page_4k.acc_perms2 == 0;
+
+	return user && (!write || writable);
+}
+
+static bool arm_mmu_page_user_ok(uintptr_t addr, int write)
+{
+	uint32_t l1_index = ((uint32_t)addr >> ARM_MMU_PTE_L1_INDEX_PA_SHIFT) &
+			    ARM_MMU_PTE_L1_INDEX_MASK;
+	uint32_t l2_index = ((uint32_t)addr >> ARM_MMU_PTE_L2_INDEX_PA_SHIFT) &
+			    ARM_MMU_PTE_L2_INDEX_MASK;
+
+	if (l1_page_table.entries[l1_index].undefined.id == ARM_MMU_PTE_ID_SECTION) {
+		return arm_mmu_l1_section_user_ok(l1_index, write);
+	}
+
+	if (l1_page_table.entries[l1_index].undefined.id == ARM_MMU_PTE_ID_L2_PT) {
+		return arm_mmu_l2_page_user_ok(l1_index, l2_index, write);
+	}
+
+	return false;
+}
+
+int arch_mem_domain_max_partitions_get(void)
+{
+	return CONFIG_MAX_DOMAIN_PARTITIONS;
+}
+
+void z_arm_mmu_apply_mem_domain(struct k_mem_domain *domain)
+{
+	int i;
+
+	if (domain == NULL) {
+		return;
+	}
+
+	if (active_mem_domain != NULL) {
+		for (i = 0; i < CONFIG_MAX_DOMAIN_PARTITIONS; i++) {
+			struct k_mem_partition *partition = &active_mem_domain->partitions[i];
+
+			if (partition->size == 0U) {
+				continue;
+			}
+
+			z_arm_mmu_remap_user_region((void *)partition->start,
+						    partition->size,
+						    K_MEM_PARTITION_P_RW_U_NA);
+		}
+	}
+
+	if ((uintptr_t)_app_smem_size != 0) {
+		z_arm_mmu_remap_user_region(_app_smem_start, (size_t)_app_smem_size,
+					    K_MEM_PARTITION_P_RW_U_NA);
+	}
+
+	for (i = 0; i < CONFIG_MAX_DOMAIN_PARTITIONS; i++) {
+		struct k_mem_partition *partition = &domain->partitions[i];
+
+		if (partition->size == 0U) {
+			continue;
+		}
+
+		z_arm_mmu_remap_user_region((void *)partition->start,
+					    partition->size,
+					    partition->attr);
+	}
+
+	active_mem_domain = domain;
+}
+
+static bool arm_mmu_mem_domain_is_active(struct k_mem_domain *domain)
+{
+	return !k_is_pre_kernel() && (_current != NULL) &&
+	       (_current->mem_domain_info.mem_domain == domain);
+}
+
+static bool arm_mmu_mem_partition_is_aligned(struct k_mem_partition *partition)
+{
+	return IS_ALIGNED(partition->start, CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE) &&
+	       IS_ALIGNED(partition->size, CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE);
+}
+
+int arch_mem_domain_thread_add(struct k_thread *thread)
+{
+	if (!k_is_pre_kernel() && (_current != NULL) &&
+	    ((thread == _current) ||
+	     (thread->mem_domain_info.mem_domain == _current->mem_domain_info.mem_domain))) {
+		z_arm_mmu_apply_mem_domain(thread->mem_domain_info.mem_domain);
+	}
+
+	return 0;
+}
+
+int arch_mem_domain_thread_remove(struct k_thread *thread)
+{
+	if (((thread->base.user_options & K_USER) != 0U) &&
+	    ((thread->base.thread_state & _THREAD_DEAD) != 0U)) {
+		z_arm_mmu_remap_user_region((void *)thread->stack_info.start,
+					    thread->stack_info.size,
+					    K_MEM_PARTITION_P_RW_U_NA);
+	}
+
+	return 0;
+}
+
+int arch_mem_domain_partition_add(struct k_mem_domain *domain, uint32_t partition_id)
+{
+	struct k_mem_partition *partition = &domain->partitions[partition_id];
+
+	if (!arm_mmu_mem_partition_is_aligned(partition)) {
+		return -EINVAL;
+	}
+
+	if (arm_mmu_mem_domain_is_active(domain) && (partition->size != 0U)) {
+		z_arm_mmu_remap_user_region((void *)partition->start,
+					    partition->size,
+					    partition->attr);
+	}
+
+	return 0;
+}
+
+int arch_mem_domain_partition_remove(struct k_mem_domain *domain, uint32_t partition_id)
+{
+	struct k_mem_partition *partition = &domain->partitions[partition_id];
+
+	if (arm_mmu_mem_domain_is_active(domain) && (partition->size != 0U)) {
+		z_arm_mmu_remap_user_region((void *)partition->start,
+					    partition->size,
+					    K_MEM_PARTITION_P_RW_U_NA);
+	}
+
+	return 0;
+}
+
+int arch_buffer_validate(const void *addr, size_t size, int write)
+{
+	uintptr_t start = (uintptr_t)addr;
+	uintptr_t end;
+	uintptr_t page;
+	int key;
+	int rc = 0;
+
+	if (size == 0) {
+		return 0;
+	}
+
+	if (start + size - 1 < start) {
+		return -EPERM;
+	}
+
+	end = start + size - 1;
+
+	key = arch_irq_lock();
+	for (page = start & ~(CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE - 1);
+	     page <= end;
+	     page += CONFIG_ARM_MMU_REGION_MIN_ALIGN_AND_SIZE) {
+		if (!arm_mmu_page_user_ok(page, write)) {
+			rc = -EPERM;
+			break;
+		}
+	}
+	arch_irq_unlock(key);
+
+	return rc;
+}
+#endif /* CONFIG_USERSPACE */
+
 /**
  * @brief ARMv7-specific implementation of memory mapping at run-time
  * Maps memory according to the parameters provided by the caller
@@ -1002,6 +1253,9 @@ static int __arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flag
 	}
 	if (flags & K_MEM_PERM_EXEC) {
 		conv_flags |= MPERM_X;
+	}
+	if (flags & K_MEM_PERM_USER) {
+		conv_flags |= MPERM_UNPRIVILEGED;
 	}
 
 	perms_attrs = arm_mmu_convert_attr_flags(conv_flags);
