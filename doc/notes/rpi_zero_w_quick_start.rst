@@ -7,32 +7,28 @@ bring-up in this repository.
 What Runs On Hardware
 *********************
 
-The following have been run on real Raspberry Pi Zero W hardware:
+The current branch is beyond first-boot bring-up.  The broad kernel sweep is
+summarized in ``doc/notes/results/run-20260509-123546/summary.txt`` and the
+logging sweep is summarized in
+``doc/notes/results/run-20260509-134149/summary.txt``.
 
-- ``samples/hello_world``
-- ``samples/drivers/uart/echo_bot``
-- ``samples/basic/blinky``
-- ``samples/basic/button``
-- ``samples/basic/threads``
-- ``samples/basic/hash_map``
-- ``samples/subsys/logging/logger``
-- ``samples/kernel/msg_queue``
-- ``samples/kernel/condition_variables/simple``
-- ``samples/kernel/condition_variables/condvar``
-- ``tests/kernel/mem_protect/mem_map``
-- ``tests/kernel/timer/timer_monotonic``
-- ``tests/kernel/sleep``
-- ``tests/kernel/timer/timer_api``
-- ``tests/kernel/timer/timer_behavior``
-- ``tests/kernel/workq/work_queue``
-- ``tests/kernel/sched/preempt``
-- ``tests/kernel/pipe/pipe_api``
-- ``tests/kernel/fatal/exception``
-- ``tests/kernel/common``
-- ``tests/kernel/threads/thread_apis``
-- ``tests/kernel/mutex/mutex_api``
-- ``tests/arch/common/interrupt``
-- ``tests/kernel/context``
+Working topics covered by those hardware runs include:
+
+- boot, reset, vectors, exceptions, and fatal-error recovery
+- AUX mini-UART console and RX/TX
+- GPIO output on the ACT LED and GPIO input/interrupts for the button sample
+- ARMCTRL timer IRQ delivery, sleeps, timeouts, timers, and delayed work
+- scheduler behavior, preemption, thread lifecycle, stacks, dynamic threads,
+  work queues, pipes, FIFOs, LIFOs, queues, message queues, mailboxes, events,
+  condition variables, semaphores, mutexes, and memory slabs/heaps
+- common kernel helpers, object tracking/core APIs, device APIs, profiling
+  hooks, runtime stats, and cleanup paths
+- ARM1176 cache maintenance and runtime MMU mapping
+- userspace, syscalls, object validation, memory domains, memory protection,
+  futexes, stack protection, stack randomization, and ``k_mem_map()``
+- logging core/API coverage, deferred/immediate/blocking logging, custom
+  headers, rate limiting, timestamps, output formatting, link ordering,
+  frontend paths, stress tests, and network-output formatting
 
 Notes:
 
@@ -42,14 +38,8 @@ Notes:
 - ``samples/basic/threads`` uses the sample-specific
   ``samples/basic/threads/boards/rpi_zero_w.overlay`` overlay for a temporary
   external ``led1`` on GPIO27.
-- ``tests/kernel/mem_protect/mem_map`` is the current MMU validation
-  test that have been run on hardware.
-- The timer/scheduler validation set covers monotonic cycle reads, sleeps,
-  timer APIs, timer jitter/drift behavior, delayed work, preemption, and pipe
-  concurrency on real hardware.
-- The broader kernel validation set now also covers fatal exceptions, common
-  kernel helpers, thread lifecycle APIs, and mutex priority-inheritance paths
-  on real hardware.
+- The full per-test status is intentionally kept in the summary files above
+  instead of duplicated here.
 - ``tests/arch/common/interrupt`` passes on real hardware.  The BCM2835
   ``trigger_irq()`` support used by the dynamic/nested cases is a software ISR
   table dispatch, similar to the existing RX test hook, not an ARMCTRL
@@ -58,6 +48,25 @@ Notes:
 - ``tests/kernel/context`` passes on real hardware after the ARM1176 idle path
   was changed to use the CP15 wait-for-interrupt operation instead of the
   ARMv7-style ``WFI`` instruction.
+
+Known Not-Working Or Not-Applicable Cases
+*****************************************
+
+- Demand-paging tests are skipped.  The current ``rpi_zero_w`` ARM1176 MMU
+  port does not implement Zephyr demand paging/demand mapping.
+- SMP, IPI, MP, and most FPU-sharing coverage is skipped because Raspberry Pi
+  Zero W is a single-core ARM1176 target and the current validation target does
+  not enable those features.
+- ``tests/kernel/timer/cycle64`` is skipped because the current BCM2835 timer
+  path exposes 32-bit cycle reads.
+- ``tests/kernel/timer/starve`` is a long 3600 s starvation soak and is left
+  out of the normal sweep.
+- ``tests/kernel/fatal/message_capture`` is skipped by the local hardware
+  harness because the expected fatal path does not end with the normal project
+  success marker.
+- In the logging sweep, ``dictionary`` and ``log_disabled`` are skipped by the
+  local test list.  ``log_backend_fs`` and ``log_backend_uart`` currently
+  build-fail in the hardware sweep and are not counted as working topics yet.
 
 Build A Sample
 **************
