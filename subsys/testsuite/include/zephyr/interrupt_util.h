@@ -271,9 +271,12 @@ static inline void trigger_irq(int irq)
 
 #elif defined(CONFIG_SOC_BCM2835)
 /*
- * BCM2835 ARMCTRL has no NVIC-style software-pend for arbitrary GPU IRQ lines.
- * Dispatch through the SW ISR table so common interrupt tests can exercise the
- * Zephyr ISR connection path.  This is not a hardware-pended interrupt.
+ * BCM2835 ARMCTRL does not expose an NVIC/GIC-style software-pend register
+ * for arbitrary GPU IRQ lines.  The pending registers are read-only status,
+ * the enable/disable registers only affect masks, and FIQ control only routes
+ * one selected source to FIQ.  Dispatch through the SW ISR table so common
+ * interrupt tests can exercise the Zephyr ISR connection path.  This is not a
+ * hardware-pended interrupt.
  */
 #include <zephyr/irq.h>
 #include <zephyr/sw_isr_table.h>

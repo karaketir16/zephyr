@@ -19,6 +19,16 @@ The current summary files are the source of truth for full per-test status:
   regressed and were fixed in the same session (see below).
 - ``doc/notes/results/run-failures-fix-3/summary.txt``: targeted rerun of the
   three regressions after the fixes; all pass.
+- ``doc/notes/results/run-basic-context-after-arm11-smp-audit-venv/summary.txt``:
+  targeted real-hardware ``tests/kernel/context`` rerun after auditing the
+  remaining inherited ``cortex_a_r/`` files and removing ``smp.c`` from
+  non-SMP ARM11 builds; passes.
+- ``doc/notes/results/run-armctrl-basic-armtimer/summary.txt``: targeted
+  real-hardware ``tests/arch/common/interrupt`` rerun after adding a BCM2835
+  ARM timer test for ARMCTRL basic IRQ bit 0; passes.
+- ``doc/notes/results/run-bcm2835-dma-memcpy-2/summary.txt``: targeted
+  real-hardware ``tests/drivers/dma/bcm2835_memcpy`` run after adding the
+  first BCM2835 DMA controller driver; memory-to-memory channel 0 passes.
 
 Current State
 *************
@@ -83,9 +93,14 @@ Current State
 - ``CPU_ARM1176JZF_S`` now selects the new ``CPU_AARCH32_ARM11`` Kconfig
   symbol instead of ``CPU_AARCH32_CORTEX_A``.  The ARM11 path no longer
   inherits the Cortex-A Kconfig umbrella; ``cortex_a_r/`` shared files are
-  still compiled (they are generic enough to be safe) but are now gated on
-  ``CPU_AARCH32_ARM11`` at the CMake level.  Three regressions introduced by
-  this Kconfig change were caught and fixed in the same session:
+  still compiled where they are generic enough to be safe, but are now gated
+  on ``CPU_AARCH32_ARM11`` at the CMake level.  The remaining inherited files
+  were audited after the split; the only concrete cleanup was to stop compiling
+  the shared Cortex-A/R ``smp.c`` for non-SMP ARM11 builds and to remove the
+  now-unused ``arm_cpu_boot_params`` reference from the ARM11 reset path.
+  ``tests/kernel/context`` was rerun on real hardware after this cleanup and
+  passed.  Three regressions introduced by the Kconfig change were caught and
+  fixed in the same session:
 
   - ``arch/Kconfig``: ``ARCH_HAS_THREAD_LOCAL_STORAGE`` was missing
     ``CPU_AARCH32_ARM11`` — TLS was silently disabled, breaking ``errno``
@@ -116,12 +131,17 @@ The following pieces now exist in-tree:
   - AUX mini-UART
   - GPIO
   - system timer
+  - DMA
 
 - BCM2835 GPIO driver in ``drivers/gpio/gpio_bcm2835.c``.
 - BCM2835 ARMCTRL interrupt-controller driver in
   ``drivers/interrupt_controller/intc_bcm2835_armctrl.c``.
 - BCM2835 system timer driver in
   ``drivers/timer/bcm2835_system_timer.c``.
+- BCM2835 DMA controller driver in ``drivers/dma/dma_bcm2835.c``.  The first
+  supported path is memory-to-memory transfer through the Zephyr DMA API; it
+  uses the BCM2835 DMA bus alias for RAM and explicit cache maintenance around
+  control blocks and buffers.
 - BCM2835 mini-UART reuse through the existing Broadcom AUX mini-UART driver.
 - ``rpi_zero_w`` ``led0`` wiring for the real ACT LED on GPIO47.
 - ``samples/basic/button/boards/rpi_zero_w.overlay`` for a temporary external
@@ -260,6 +280,12 @@ Key facts confirmed from those sources:
 - BCM2835 AUX mini-UART register access is gated by AUX enable control.
 - BCM2835 ARMCTRL base is ``0x2000b000`` on the ARM-visible peripheral map.
 - BCM2835 system timer is suitable for a first periodic kernel tick source.
+- BCM2835 ARMCTRL does not provide an NVIC/GIC-style software-pend register
+  for arbitrary GPU IRQ lines.  The peripherals manual describes read-only
+  pending registers, write-one-to-set/clear enable registers, and a single FIQ
+  source selector; Linux ``drivers/irqchip/irq-bcm2835.c`` follows that model
+  with mask/unmask operations only.  The local ``trigger_irq()`` helper for
+  BCM2835 therefore remains a software ISR-table dispatch by design.
 - ARM1176 reset starts from low vectors unless high vectors are enabled.
 - ARM1176 exception vectors can be relocated with VBAR.
 - BCM2835 D-cache is 16 KB, 4-way set-associative, 16-byte cache lines, 256
@@ -288,10 +314,11 @@ finished port:
 
 - ``CONFIG_CPU_ARM1176JZF_S`` now selects the dedicated ``CPU_AARCH32_ARM11``
   symbol instead of ``CPU_AARCH32_CORTEX_A``.  The shared ``cortex_a_r/`` base
-  (exc.S, irq_init, prep_c, stacks, vector_table, irq_manage, smp, reboot,
-  tcm) is still compiled for ARM11 via a separate ``add_subdirectory_ifdef``
-  in ``arch/arm/core/CMakeLists.txt``; those files are generic enough to be
-  safe but have not yet been audited for hidden Cortex-A/R assumptions.
+  files still compiled for ARM11 are ``exc.S``, ``irq_init.c``, ``prep_c.c``,
+  ``stacks.c``, ``vector_table.S``, ``irq_manage.c``, ``reboot.c``, and
+  ``tcm.c``.  These files were audited for obvious ARMv7-only or Cortex-A/R
+  assumptions and remain in the shared path.  ``smp.c`` is no longer compiled
+  for non-SMP ARM11 builds.
 - ``soc/brcm/bcm2835/soc.h`` only provides the minimum core-identification
   support needed for compilation.
 - ``soc/brcm/bcm2835/pinctrl_soc.h`` is a stub.
@@ -357,9 +384,11 @@ Representative working topics:
 - Faults and interrupts: fatal exception handling passes, and
   ``tests/arch/common/interrupt`` validates ISR table connection,
   enable-state handling, offload behavior, nested ISR control flow, and the
-  real hardware timer interrupt path under ``irq_lock()`` / unlock.  Its
-  BCM2835 ``trigger_irq()`` hook is still a software ISR table dispatch for
-  test control flow, not hardware-pended ARMCTRL GPU IRQ injection.
+  real hardware timer interrupt path under ``irq_lock()`` / unlock.  It now
+  also validates the BCM2835 ARMCTRL basic IRQ path using the ARM timer routed
+  through basic IRQ bit 0.  Its BCM2835 ``trigger_irq()`` hook is still a
+  software ISR table dispatch for test control flow, not hardware-pended
+  ARMCTRL GPU IRQ injection.
 - MMU, cache, and userspace: cache tests, ``k_mem_map()``, memory protection,
   memory domains, futexes, syscalls, object validation, stack protection,
   stack randomization, user stacks, and userspace access-fault behavior pass on
@@ -368,6 +397,9 @@ Representative working topics:
   immediate modes, blocking logging, backend init, custom headers, frontend
   paths, link ordering, message/output formatting, network-output formatting,
   rate limiting, stress, timestamp, and system-tracing related coverage.
+- DMA: ``tests/drivers/dma/bcm2835_memcpy`` validates a 512-byte
+  memory-to-memory copy on DMA channel 0 on real hardware.  Peripheral DREQ
+  clients are intentionally not claimed yet.
 - Samples: ``sys_heap``, ``threads``, ``hash_map``, ``logger``,
   ``msg_queue``, and the condition-variable samples have all been used during
   bring-up.  ``samples/basic/atomic_set`` remains a development-only ARM1176
@@ -630,30 +662,34 @@ Observed result with the sequence above:
 What Is Not Verified Yet
 ************************
 
-- ARMCTRL interrupt handling on hardware beyond the currently validated timer,
-  mini-UART RX, and BCM2835 GPIO button-interrupt cases
-- Hardware-pended software triggering for arbitrary BCM2835 ARMCTRL GPU IRQ
-  lines.  ``tests/arch/common/interrupt`` now passes, but its BCM2835
-  ``trigger_irq()`` helper is an SW ISR table dispatch used for test control
-  flow, not an ARMCTRL pending-bit mechanism.
+- More real-device ARMCTRL source coverage can still be added as drivers grow
+  (for example PL011, SPI, I2C, or SDHOST), but the current board bring-up
+  already covers the system timer, AUX mini-UART RX, GPIO, ARM timer basic IRQ
+  bit 0, and DMA channel 0 paths on hardware.
 
 Open Risks
 **********
 
 - The shared ``cortex_a_r/`` files that ARM11 still inherits (vector table,
-  exception entry stubs, irq_manage, prep_c, stacks, reboot, tcm, smp) have
-  not been audited for hidden Cortex-A/R assumptions.  They are expected to be
-  safe on ARM1176 based on all tests passing, but a formal audit against the
-  ARM1176JZF-S TRM has not been done.  The Kconfig lineage risk (no dedicated
-  ``CPU_AARCH32_ARM11`` symbol) has been resolved.
+  exception entry stubs, irq_manage, prep_c, stacks, reboot, tcm) have now
+  been reviewed for obvious hidden Cortex-A/R assumptions.  The cleanup from
+  that review was to keep ``smp.c`` out of non-SMP ARM11 builds and remove the
+  stale ``arm_cpu_boot_params`` reference from ``arm11/reset.S``.  Remaining
+  risk is not a known failing path, but the normal risk of keeping these
+  generic files shared between ARM11 and Cortex-A/R.
 - The current timer driver is a simple periodic tick source with real-hardware
   validation across monotonic cycle reads, sleeps, timer APIs, delayed work,
   preemption, pipe concurrency, and a roughly 200-second jitter/drift run.
   Timeout reprogramming and tickless support are still missing.
-- Broader ARMCTRL interrupt-source validation beyond the already proven timer,
-  mini-UART RX, and BCM2835 GPIO button paths is still needed.  The
+- ARMCTRL hardware coverage now includes the system timer, mini-UART RX,
+  BCM2835 GPIO button path, and ARM timer basic IRQ bit 0.  Additional source
+  coverage should be tied to real peripheral drivers.  Arbitrary
+  hardware-pended GPU IRQ injection is not available through ARMCTRL, so the
   BCM2835 ``trigger_irq()`` in ``tests/arch/common/interrupt`` remains a
-  software ISR-table dispatch, not a hardware-pended ARMCTRL GPU IRQ.
+  software ISR-table dispatch by design.
+- BCM2835 DMA coverage is currently memory-to-memory only.  Peripheral DREQ
+  mapping, scatter/gather chains beyond one control block, and clients such as
+  SPI/I2C/SDHOST still need separate bring-up and hardware validation.
 - ``-mno-unaligned-access`` is still required.  It is a correct match for the
   ARM1176 execution model but is enforced at the SoC build level rather than
   through a proper ARM11 architecture flag.
@@ -670,18 +706,12 @@ Recommended Next Steps
 
 Work in this order unless new hardware results force a change:
 
-1. Audit the ``cortex_a_r/`` files that ARM1176 still inherits (``exc.S``,
-   ``vector_table.S``, ``irq_manage.c``, ``prep_c.c``, ``stacks.c``,
-   ``reboot.c``, ``tcm.c``, ``smp.c``) for any hidden Cortex-A/R assumptions.
-   These are expected to be safe based on the passing test sweep, but a formal
-   review against the ARM1176JZF-S TRM has not been done.
+1. Continue ARMCTRL source coverage as more BCM2835 peripherals become useful
+   in this port.  Good candidates are PL011, SPI, I2C, and SDHOST.  Do
+   not chase a hardware-pended ``trigger_irq()`` equivalent for arbitrary GPU
+   IRQ lines; the ARMCTRL block does not expose such a software-pend path.
 
-2. Expand real-hardware interrupt validation beyond the already working timer
-   tick, mini-UART RX echo path, and BCM2835 GPIO interrupt-driven button path.
-   The remaining gap is broader ARMCTRL source coverage and a hardware-pended
-   ``trigger_irq()`` for the interrupt test.
-
-3. Follow-up expansion now that the Kconfig split is clean:
+2. Follow-up expansion now that the Kconfig split is clean:
 
    - broader BCM2835 pinctrl coverage beyond the mini-UART path
    - broader BCM2835 GPIO coverage beyond the current minimal banks
@@ -689,7 +719,7 @@ Work in this order unless new hardware results force a change:
    - less minimal timer behavior (tickless, reprogrammable comparator)
    - general board refinement
 
-4. Continue hardening userspace/MMU coverage:
+3. Continue hardening userspace/MMU coverage:
 
    - decide whether ASID support is worth adding now
    - keep growing userspace regression coverage when memory-domain behavior or
@@ -701,3 +731,17 @@ Previously completed steps (for reference):
   ``CPU_AARCH32_CORTEX_A``.  ``CPU_ARM1176JZF_S`` now selects the new symbol
   directly.  Three regressions from the refactor were caught and fixed in the
   same session (TLS disabled, fatal/exception ARM11 branch missing).
+- *(done)* Audited the remaining inherited ``cortex_a_r/`` files.  ``smp.c``
+  is now compiled only for ``CONFIG_SMP``, and the ARM11 reset path no longer
+  references the shared SMP boot parameter object.  A targeted
+  ``tests/kernel/context`` run passed on real hardware afterward.
+- *(done)* Added BCM2835 ARM timer coverage to
+  ``tests/arch/common/interrupt``.  This validates ARMCTRL basic IRQ bit 0 on
+  real hardware.
+- *(done)* Checked the BCM2835 peripherals manual and Linux
+  ``irq-bcm2835.c`` for a software-pend mechanism.  ARMCTRL has no arbitrary
+  GPU IRQ software-pend register, so the BCM2835 ``trigger_irq()`` helper is
+  intentionally documented as software ISR-table dispatch.
+- *(done)* Added the first BCM2835 DMA driver and a focused
+  ``tests/drivers/dma/bcm2835_memcpy`` hardware test.  This validates a
+  memory-to-memory transfer on DMA channel 0 using the Zephyr DMA API.

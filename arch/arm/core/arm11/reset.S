@@ -20,7 +20,6 @@
 #include <offsets_short.h>
 #include <cortex_a_r/tcm.h>
 #include "vector_table.h"
-#include "boot.h"
 #include "macro_priv.inc"
 
 _ASM_FILE_PROLOGUE
@@ -80,8 +79,6 @@ SECTION_SUBSEC_FUNC(TEXT, _reset_section, __start)
     mcr p15, 0, r0, c1, c0, 0
     data_sync_barrier
     instr_sync_barrier
-
-    ldr r0, =arm_cpu_boot_params
 
     ldr r4, =z_prep_c
     ldr r5, =(z_arm_fiq_stack + CONFIG_ARMV7_FIQ_STACK_SIZE)

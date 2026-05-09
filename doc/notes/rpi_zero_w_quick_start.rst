@@ -18,13 +18,23 @@ Hardware sweep summary files:
 - ``doc/notes/results/run-20260509-134149/summary.txt`` — logging sweep
 - ``doc/notes/results/run-20260509-200705/summary.txt`` — full kernel sweep on
   the dedicated ``arm11/`` path (83 PASS, 14 expected SKIPs, 0 failures)
+- ``doc/notes/results/run-basic-context-after-arm11-smp-audit-venv/summary.txt``
+  — targeted ``tests/kernel/context`` rerun after the inherited
+  ``cortex_a_r/`` audit and non-SMP ``smp.c`` cleanup
+- ``doc/notes/results/run-armctrl-basic-armtimer/summary.txt`` — targeted
+  ``tests/arch/common/interrupt`` rerun after adding BCM2835 ARM timer
+  coverage for ARMCTRL basic IRQ bit 0
+- ``doc/notes/results/run-bcm2835-dma-memcpy-2/summary.txt`` — targeted
+  ``tests/drivers/dma/bcm2835_memcpy`` run after adding the first BCM2835 DMA
+  controller path
 
 Working topics covered by those hardware runs include:
 
 - boot, reset, vectors, exceptions, and fatal-error recovery
 - AUX mini-UART console and RX/TX
 - GPIO output on the ACT LED and GPIO input/interrupts for the button sample
-- ARMCTRL timer IRQ delivery, sleeps, timeouts, timers, and delayed work
+- ARMCTRL timer IRQ delivery, ARM timer basic IRQ delivery, sleeps, timeouts,
+  timers, and delayed work
 - scheduler behavior, preemption, thread lifecycle, stacks, dynamic threads,
   work queues, pipes, FIFOs, LIFOs, queues, message queues, mailboxes, events,
   condition variables, semaphores, mutexes, and memory slabs/heaps
@@ -37,6 +47,7 @@ Working topics covered by those hardware runs include:
 - logging core/API coverage, deferred/immediate/blocking logging, custom
   headers, rate limiting, timestamps, output formatting, link ordering,
   frontend paths, stress tests, and network-output formatting
+- BCM2835 DMA memory-to-memory copy on channel 0 through the Zephyr DMA API
 
 Notes:
 
@@ -52,10 +63,15 @@ Notes:
   ``trigger_irq()`` support used by the dynamic/nested cases is a software ISR
   table dispatch, similar to the existing RX test hook, not an ARMCTRL
   hardware-pended GPU interrupt.  The timer-backed interrupt lock case uses
-  the real hardware timer IRQ path.
+  the real hardware system timer IRQ path, and the BCM2835-specific ARM timer
+  case validates ARMCTRL basic IRQ bit 0.
 - ``tests/kernel/context`` passes on real hardware after the ARM1176 idle path
   was changed to use the CP15 wait-for-interrupt operation instead of the
-  ARMv7-style ``WFI`` instruction.
+  ARMv7-style ``WFI`` instruction.  It was also rerun after the inherited
+  ``cortex_a_r/`` audit that removed ``smp.c`` from non-SMP ARM11 builds.
+- ``tests/drivers/dma/bcm2835_memcpy`` currently validates memory-to-memory DMA
+  only.  Peripheral DREQ users and multi-control-block scatter/gather are not
+  claimed as working yet.
 
 Known Not-Working Or Not-Applicable Cases
 *****************************************
@@ -75,6 +91,19 @@ Known Not-Working Or Not-Applicable Cases
 - In the logging sweep, ``dictionary`` and ``log_disabled`` are skipped by the
   local test list.  ``log_backend_fs`` and ``log_backend_uart`` currently
   build-fail in the hardware sweep and are not counted as working topics yet.
+
+Current Next Step
+*****************
+
+Continue ARMCTRL source coverage as more BCM2835 peripherals become useful in
+this port.  Good candidates are PL011, SPI, I2C, and SDHOST.  The current
+common interrupt test now has real hardware coverage for the system timer, ARM
+timer basic IRQ bit 0, mini-UART RX, and GPIO paths, and the DMA memcpy test
+now covers DMA channel 0.  The BCM2835
+``trigger_irq()`` helper intentionally remains a software ISR-table dispatch:
+the ARMCTRL block has read-only pending status, write-one enable/disable masks,
+and FIQ source selection, but no software-pend path for arbitrary GPU IRQ
+lines.
 
 Build A Sample
 **************

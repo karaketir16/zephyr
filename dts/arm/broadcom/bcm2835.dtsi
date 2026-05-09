@@ -83,6 +83,18 @@
 			status = "okay";
 		};
 
+		dma: dma-controller@20007000 {
+			compatible = "brcm,bcm2835-dma";
+			reg = <0x20007000 0xf00>;
+			interrupts = <16>, <17>, <18>, <19>, <20>, <21>,
+				     <22>, <23>, <24>, <25>, <26>,
+				     <27>, <27>, <27>, <27>;
+			dma-channels = <15>;
+			#dma-cells = <1>;
+			brcm,dma-channel-mask = <0x7f35>;
+			status = "okay";
+		};
+
 		uart0_clk: uart0-clk {
 			compatible = "fixed-clock";
 			clock-frequency = <48000000>;

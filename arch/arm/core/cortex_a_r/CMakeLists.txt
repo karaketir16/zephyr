@@ -12,9 +12,9 @@ zephyr_library_sources(
   vector_table.S
   irq_manage.c
   prep_c.c
-  smp.c
   )
 
+zephyr_library_sources_ifdef(CONFIG_SMP smp.c)
 zephyr_library_sources_ifdef(CONFIG_SEMIHOST semihost.c)
 zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE __aeabi_read_tp.S)
 zephyr_library_sources_ifdef(CONFIG_USE_SWITCH switch.S)
