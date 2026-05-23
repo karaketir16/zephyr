@@ -114,7 +114,7 @@ static ALWAYS_INLINE bool arch_cpu_irqs_are_enabled(void)
 #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
 	return __get_BASEPRI() == 0U;
 #elif defined(CONFIG_ARMV7_R) || defined(CONFIG_AARCH32_ARMV8_R) \
-	|| defined(CONFIG_ARMV7_A)
+	|| defined(CONFIG_ARMV7_A) || defined(CONFIG_ARMV6_ARM1176)
 	unsigned int cpsr;
 
 	__asm__ volatile("mrs %0, cpsr" : "=r" (cpsr));
